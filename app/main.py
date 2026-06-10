@@ -13,22 +13,11 @@ from __future__ import annotations
 import argparse
 
 from app.core.chat_controller import ChatController
+from app.core.commands import format_help_text
 from app.core.config import FEATURE_DISPLAY_NAMES, load_config
+from app.rag.retriever import Retriever
 
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit"}
-
-CLI_HELP = """Available commands:
-  /help          Show this help
-  /status        Show model and active features
-  /features      List feature flags (or: /features list)
-  /features <name> on|off
-                 Toggle a feature (auto-saves to config.yaml)
-  /rag [all|doc1,doc2,...]
-                 Toggle RAG and select documents (e.g., /rag all or /rag doc1.txt,doc2.txt)
-  /reload-soul   Reload SOUL.md and rebuild the system prompt
-  /exit or /quit Exit the chatbot
-
-Type anything else to chat."""
 
 
 def _handle_features_cli(controller: ChatController, args: str) -> None:
@@ -53,6 +42,91 @@ def _handle_features_cli(controller: ChatController, args: str) -> None:
     print("Usage: /features | /features list | /features <name> on|off")
 
 
+def _handle_rag_cli(controller: ChatController, args: str) -> None:
+    arg = args.strip().lower()
+
+    if arg == "on":
+        controller.enable_rag()
+        available = controller.get_available_sources()
+        if not available:
+            print("RAG enabled, but no documents found.\nRun /ingest to index docs/.")
+        else:
+            print(f"RAG enabled. Using all {len(available)} document(s).")
+        return
+
+    if arg == "off":
+        controller.disable_rag()
+        print("RAG disabled.")
+        return
+
+    if not args:
+        enabled = controller.toggle_rag()
+        if enabled:
+            available = controller.get_available_sources()
+            if not available:
+                print(
+                    "RAG enabled, but no documents found in the vector store.\n"
+                    "Run /ingest to index documents."
+                )
+            else:
+                controller.set_rag_sources(available)
+                print(f"RAG enabled. Using all {len(available)} document(s):")
+                for doc in available:
+                    print(f"  - {doc}")
+        else:
+            print("RAG disabled.")
+        return
+
+    if arg == "all":
+        controller.enable_rag()
+        available = controller.get_available_sources()
+        if not available:
+            print("No documents found in the vector store.")
+        else:
+            controller.set_rag_sources(available)
+            print(f"RAG enabled using all {len(available)} document(s):")
+            for doc in available:
+                print(f"  - {doc}")
+        return
+
+    requested = [doc.strip() for doc in args.split(",")]
+    available = controller.get_available_sources()
+    valid_docs = [doc for doc in requested if doc in available]
+    invalid_docs = [doc for doc in requested if doc not in available]
+
+    if not valid_docs:
+        print(
+            f"None of the requested documents found.\n"
+            f"Available: {', '.join(available) if available else 'none'}"
+        )
+        return
+
+    controller.enable_rag(valid_docs)
+    print(f"RAG enabled using {len(valid_docs)} document(s):")
+    for doc in valid_docs:
+        print(f"  - {doc}")
+    if invalid_docs:
+        print(f"\nNot found: {', '.join(invalid_docs)}")
+
+
+def _handle_ingest_cli(controller: ChatController) -> None:
+    def on_progress(name: str, method: str, current: int, total: int) -> None:
+        print(f"[{current}/{total}] {name} ({method})")
+
+    result = controller.run_ingest(on_progress=on_progress)
+    print(result.summary())
+    for note in result.errors:
+        print(f"Note: {note}")
+    for skipped in result.skipped:
+        print(f"Skipped: {skipped}")
+    if not controller.rag_enabled:
+        print("Tip: run /rag on to enable retrieval.")
+
+
+def _handle_sources_cli(controller: ChatController) -> None:
+    print(Retriever.format_sources_detail(controller.last_retrieved_chunks))
+
+
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     """Handle CLI commands. Return True if should continue, False if should exit."""
     parts = cmd.split(maxsplit=1)
@@ -62,61 +136,20 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     if command in ("/exit", "/quit", "exit", "quit"):
         return False
     elif command == "/help":
-        print(CLI_HELP)
+        print(format_help_text())
     elif command == "/status":
+        backend = controller.compute_backend
         print(f"Model: {controller.model_name}")
         print(f"Active features: {controller.features_summary()}")
+        print(f"Compute: {backend.label} ({backend.detail})")
     elif command == "/features":
         _handle_features_cli(controller, args)
+    elif command == "/ingest":
+        _handle_ingest_cli(controller)
+    elif command == "/sources":
+        _handle_sources_cli(controller)
     elif command == "/rag":
-        if not args:
-            enabled = controller.toggle_rag()
-            if enabled:
-                available = controller.get_available_sources()
-                if not available:
-                    print(
-                        "RAG enabled, but no documents found in the vector store.\n"
-                        "Run ingestDocs.py to index documents."
-                    )
-                else:
-                    controller.set_rag_sources(available)
-                    print(f"RAG enabled. Using all {len(available)} document(s):")
-                    for doc in available:
-                        print(f"  - {doc}")
-            else:
-                print("RAG disabled.")
-        elif args.lower() == "all":
-            if not controller.rag_enabled:
-                controller.toggle_rag()
-            available = controller.get_available_sources()
-            if not available:
-                print("No documents found in the vector store.")
-            else:
-                controller.set_rag_sources(available)
-                print(f"RAG enabled using all {len(available)} document(s):")
-                for doc in available:
-                    print(f"  - {doc}")
-        else:
-            requested = [doc.strip() for doc in args.split(",")]
-            available = controller.get_available_sources()
-            valid_docs = [doc for doc in requested if doc in available]
-            invalid_docs = [doc for doc in requested if doc not in available]
-
-            if not valid_docs:
-                print(
-                    f"None of the requested documents found.\n"
-                    f"Available: {', '.join(available) if available else 'none'}"
-                )
-                return True
-
-            if not controller.rag_enabled:
-                controller.toggle_rag()
-            controller.set_rag_sources(valid_docs)
-            print(f"RAG enabled using {len(valid_docs)} document(s):")
-            for doc in valid_docs:
-                print(f"  - {doc}")
-            if invalid_docs:
-                print(f"\nNot found: {', '.join(invalid_docs)}")
+        _handle_rag_cli(controller, args)
     elif command == "/reload-soul":
         controller.reload_soul()
         print("SOUL.md reloaded.")

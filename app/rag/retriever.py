@@ -87,6 +87,33 @@ class Retriever:
 
         return chunks
 
+    def reset_collection(self) -> None:
+        """Drop the cached collection handle (e.g. after ingest)."""
+        self._collection = None
+
+    def get_stats(self) -> dict[str, int | list[str]]:
+        """Return source list and total chunk count in the vector store."""
+        collection = self._get_collection()
+        if collection is None:
+            return {"sources": [], "chunk_count": 0}
+
+        try:
+            results = collection.get(include=["metadatas"])
+            metadatas = results.get("metadatas") or []
+            sources: set[str] = set()
+            for metadata in metadatas:
+                if isinstance(metadata, dict):
+                    source = metadata.get("source")
+                    if source:
+                        sources.add(source)
+            return {
+                "sources": sorted(sources),
+                "chunk_count": len(metadatas),
+            }
+        except Exception as error:  # noqa: BLE001
+            print(f"[rag] Failed to get stats: {error}")
+            return {"sources": [], "chunk_count": 0}
+
     def get_available_sources(self) -> list[str]:
         """Return the unique set of document sources in the vector store."""
         collection = self._get_collection()
@@ -109,6 +136,35 @@ class Retriever:
             return []
 
     @staticmethod
+    def format_sources_detail(
+        chunks: list[RetrievedChunk],
+        *,
+        max_chars: int = 300,
+    ) -> str:
+        """Format retrieved chunks for /sources display."""
+        if not chunks:
+            return (
+                "No sources retrieved yet. Enable RAG and ask a question, "
+                "or run /ingest."
+            )
+
+        lines: list[str] = []
+        for index, chunk in enumerate(chunks, start=1):
+            preview = chunk.document.strip()
+            if len(preview) > max_chars:
+                preview = preview[:max_chars].rstrip() + "..."
+            distance = (
+                f"{chunk.distance:.4f}"
+                if isinstance(chunk.distance, (int, float))
+                else str(chunk.distance)
+            )
+            lines.append(
+                f"[{index}] {chunk.source} (chunk {chunk.chunk_index}, "
+                f"distance {distance})\n{preview}"
+            )
+        return "\n\n---\n\n".join(lines)
+
+    @staticmethod
     def format_context(chunks: list[RetrievedChunk]) -> str:
         """Render retrieved chunks into a prompt-ready context block."""
         blocks = [
@@ -117,3 +173,27 @@ class Retriever:
             for chunk in chunks
         ]
         return "\n\n---\n\n".join(blocks)
+
+
+def get_store_stats(config: AppConfig) -> dict[str, int | list[str]]:
+    """Return vector store statistics without loading the embedding model."""
+    try:
+        import chromadb
+
+        client = chromadb.PersistentClient(path=str(config.rag.db_dir))
+        collection = client.get_or_create_collection(name=config.rag.collection_name)
+        results = collection.get(include=["metadatas"])
+        metadatas = results.get("metadatas") or []
+        sources: set[str] = set()
+        for metadata in metadatas:
+            if isinstance(metadata, dict):
+                source = metadata.get("source")
+                if source:
+                    sources.add(source)
+        return {
+            "sources": sorted(sources),
+            "chunk_count": len(metadatas),
+        }
+    except Exception as error:  # noqa: BLE001
+        print(f"[rag] Failed to get store stats: {error}")
+        return {"sources": [], "chunk_count": 0}

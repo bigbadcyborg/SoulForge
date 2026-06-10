@@ -99,6 +99,9 @@ class RagConfig:
     top_k: int = 5
     chunk_size: int = 1200
     chunk_overlap: int = 200
+    pdf_ocr_enabled: bool = True
+    pdf_ocr_lang: str = "eng"
+    pdf_min_text_chars: int = 32
 
     @property
     def db_dir(self) -> Path:
@@ -219,6 +222,9 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         top_k=rag_section.get("topK", 5),
         chunk_size=rag_section.get("chunkSize", 1200),
         chunk_overlap=rag_section.get("chunkOverlap", 200),
+        pdf_ocr_enabled=rag_section.get("pdfOcrEnabled", True),
+        pdf_ocr_lang=rag_section.get("pdfOcrLang", "eng"),
+        pdf_min_text_chars=rag_section.get("pdfMinTextChars", 32),
     )
 
     mem_section = _section(data, "memory")

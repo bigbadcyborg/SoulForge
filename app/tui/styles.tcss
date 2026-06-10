@@ -38,8 +38,31 @@ ChatMessage.role-system {
 StatusBar {
     dock: bottom;
     height: 1;
+    layout: horizontal;
     background: $panel;
     color: $text;
+}
+
+#status-left {
+    width: 1fr;
+}
+
+#status-compute {
+    width: auto;
+    content-align: right middle;
+    padding: 0 1;
+}
+
+#status-compute.mode-gpu {
+    color: $success;
+}
+
+#status-compute.mode-cpu {
+    color: $warning;
+}
+
+#status-compute.mode-unknown {
+    color: $text-muted;
 }
 
 /* RAG Selection Modal */
@@ -114,4 +137,34 @@ FeatureToggleModal {
     width: 1fr;
     color: $text-muted;
     padding: 0 0 0 1;
+}
+
+/* Sources Modal */
+SourcesModal {
+    align: center middle;
+}
+
+#sources-modal-container {
+    width: 72;
+    height: 24;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#sources-modal-container > Label {
+    margin-bottom: 1;
+    color: $text;
+}
+
+#sources-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+#sources-content {
+    width: 100%;
+    color: $text-muted;
 }

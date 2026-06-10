@@ -4,3 +4,7 @@ llama-cpp-python
 chromadb
 PyYAML
 textual
+pypdf
+pdf2image
+pytesseract
+Pillow

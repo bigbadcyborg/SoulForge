@@ -30,6 +30,9 @@ rag:
   topK: 5
   chunkSize: 1200
   chunkOverlap: 200
+  pdfOcrEnabled: true
+  pdfOcrLang: eng
+  pdfMinTextChars: 32
 memory:
   userFile: ./app/memory/user.md
   memoryFile: ./app/memory/memory.md

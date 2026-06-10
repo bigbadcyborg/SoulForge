@@ -12,20 +12,26 @@ This project is designed to run locally (Windows/WSL) with CUDA acceleration for
 * **Runtime Feature Toggles**: Enable or disable RAG, memory, SOUL, streaming, and more via `/features` (auto-saves to `config.yaml`).
 * **Toggleable RAG**: Enable/disable RAG at runtime with `/rag` or the feature menu.
 * **Interactive Doc Selection**: Use `/rag` to select specific documents from your vector store via a checkbox-based modal.
+* **Document Ingestion**: Index `docs/` into ChromaDB with `/ingest` or `python ingestDocs.py` (text + PDF/OCR).
+* **Source Viewer**: Inspect retrieved chunks from the last question with `/sources`.
 * **WSL 2 & CUDA support**: Optimized for NVIDIA GPUs (including Blackwell/RTX 5090) within WSL Ubuntu.
 * **Persona Hot-Reload**: Update `SOUL.md` and reload the character instantly with `/reload-soul`.
+* **Compute Indicator**: Status bar shows **GPU** or **CPU** after the model loads.
 
 ## Commands
 
-* `/features`: Open the feature toggle menu (TUI) or list flags (CLI). Changes auto-save to `config.yaml`.
-* `/features list`: Show all feature flags and their on/off state.
-* `/features <name> on|off`: Toggle a single feature (e.g., `/features rag on`, `/features soul off`).
-* `/rag`: Toggle RAG on/off or open document selection modal.
-* `/rag all`: Enable RAG using all documents in the store.
-* `/rag doc1.txt,doc2.txt`: Enable RAG filter for specific document names.
-* `/status`: Show current model and active features.
+Type `/help` in the TUI or CLI for the full list with descriptions. Key commands:
+
+* `/ingest`: Index files from `docs/` into ChromaDB (text + PDF/OCR).
+* `/sources`: View retrieved chunks from the last question.
+* `/rag on` / `/rag off`: Enable or disable RAG retrieval.
+* `/rag`: Toggle RAG or open document selection modal (TUI).
+* `/rag all`: Enable RAG using all indexed documents.
+* `/rag doc1.txt,doc2.txt`: Enable RAG filtered to specific documents.
+* `/features`: Open feature toggle menu (TUI) or list flags (CLI).
+* `/status`: Show model, active features, and RAG index stats.
 * `/reload-soul`: Refresh persona from `SOUL.md` without restarting.
-* `/help`: Display all available commands.
+* `/help`: Show all commands with descriptions.
 * `/exit`: Quit the application.
 
 ## Project Structure
@@ -216,10 +222,16 @@ The chatbot loads `SOUL.md` as the system prompt.
 
 RAG allows the chatbot to answer using local documents.
 
-Install ChromaDB:
+Install Python dependencies (includes ChromaDB and PDF/OCR libraries):
 
 ```bash
-pip install chromadb
+pip install -r requirements.txt
+```
+
+For scanned PDF OCR, install system packages in WSL:
+
+```bash
+sudo apt install -y tesseract-ocr poppler-utils
 ```
 
 Put documents in:
@@ -239,7 +251,10 @@ Supported file examples:
 .html
 .css
 .js
+.pdf
 ```
+
+PDF support uses a two-stage pipeline: fast text extraction for digital PDFs, with automatic OCR fallback for scanned documents.
 
 You also need an embedding GGUF model, for example:
 
@@ -261,10 +276,16 @@ Update `ingestDocs.py` if your embedding model has a different name:
 embeddingModelPath = "./models/embedding-model.gguf"
 ```
 
-Run ingestion:
+Run ingestion (from project root):
 
 ```bash
 python ingestDocs.py
+```
+
+Or from inside the running TUI/CLI:
+
+```text
+/ingest
 ```
 
 This creates or updates:
@@ -276,7 +297,13 @@ chromaDb/
 Then run the chatbot:
 
 ```bash
-python chatbot.py
+python -m app.main
+```
+
+Enable RAG and ask questions:
+
+```text
+/rag on
 ```
 
 ## Startup Scripts

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Iterator
 
+from app.core.compute_backend import UNKNOWN, ComputeBackend, detect_compute_backend
 from app.core.config import AppConfig
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -23,6 +24,11 @@ class ModelRuntime:
         self.config = config
         self._chat: "Llama | None" = None
         self._embedder: "Llama | None" = None
+        self._compute_backend: ComputeBackend = UNKNOWN
+
+    @property
+    def compute_backend(self) -> ComputeBackend:
+        return self._compute_backend
 
     def load_chat_model(self) -> "Llama":
         """Load the GGUF chat model, raising a clear error if it is missing."""
@@ -47,6 +53,7 @@ class ModelRuntime:
             chat_format=self.config.model.chat_format,
             verbose=False,
         )
+        self._compute_backend = detect_compute_backend(self.config)
         return self._chat
 
     def load_embedding_model(self) -> "Llama":

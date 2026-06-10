@@ -7,14 +7,16 @@ logic UI-agnostic means the same code path powers every front end.
 
 from __future__ import annotations
 
-from typing import Iterator
+from typing import Callable, Iterator
 
+from app.core.compute_backend import ComputeBackend
 from app.core.config import PROJECT_ROOT, AppConfig
 from app.core.feature_state import FeatureStateManager
 from app.core.model_runtime import ModelRuntime
 from app.core.prompt_builder import PromptBuilder
 from app.memory.memory_manager import MemoryManager, MemorySnapshot
-from app.rag.retriever import Retriever, RetrievedChunk
+from app.rag.ingest import IngestResult, ingest_documents
+from app.rag.retriever import Retriever, RetrievedChunk, get_store_stats
 
 SOUL_PATH = PROJECT_ROOT / "SOUL.md"
 
@@ -43,6 +45,7 @@ class ChatController:
         self.soul_text: str = ""
         self.memory: MemorySnapshot | None = None
         self.messages: list[dict[str, str]] = []
+        self.last_retrieved_chunks: list[RetrievedChunk] = []
         self.loaded: bool = False
 
     def _on_feature_change(self, key: str, enabled: bool) -> None:
@@ -125,7 +128,30 @@ class ChatController:
             use_rag=self.features.is_enabled("rag"),
         )
         self.messages.append({"role": "user", "content": user_turn})
+        self.last_retrieved_chunks = chunks
         return chunks
+
+    def run_ingest(
+        self,
+        on_progress: Callable[[str, str, int, int], None] | None = None,
+    ) -> IngestResult:
+        """Index docs/ into ChromaDB and refresh the retriever cache."""
+        result = ingest_documents(self.config, self.runtime, on_progress=on_progress)
+        if self._retriever is not None:
+            self._retriever.reset_collection()
+        return result
+
+    def enable_rag(self, sources: list[str] | None = None) -> None:
+        """Enable RAG and optionally set document filters."""
+        self.set_feature("rag", True)
+        if sources is not None:
+            self.selected_sources = sources
+        elif self.selected_sources is None:
+            self.selected_sources = self.get_available_sources()
+
+    def disable_rag(self) -> None:
+        """Disable RAG retrieval."""
+        self.set_feature("rag", False)
 
     def toggle_rag(self) -> bool:
         """Toggle RAG on/off and return the new state."""
@@ -152,6 +178,12 @@ class ChatController:
             return False
         self.selected_sources = sources
         return True
+
+    def get_rag_stats(self) -> dict[str, int | list[str]]:
+        """Return vector store statistics."""
+        if self._retriever is not None:
+            return self._retriever.get_stats()
+        return get_store_stats(self.config)
 
     def get_rag_status(self) -> dict[str, bool | list[str] | None]:
         """Return current RAG state, enabled status, and selected sources."""
@@ -182,6 +214,10 @@ class ChatController:
     @property
     def model_name(self) -> str:
         return self.config.model.chat_model.name
+
+    @property
+    def compute_backend(self) -> ComputeBackend:
+        return self.runtime.compute_backend
 
     def active_features(self) -> list[str]:
         return self.features.active_features()

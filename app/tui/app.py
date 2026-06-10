@@ -15,21 +15,17 @@ from textual.containers import VerticalScroll
 from textual.widgets import Input
 
 from app.core.chat_controller import ChatController
+from app.core.commands import format_help_text
+from app.core.compute_backend import UNKNOWN
 from app.core.config import FEATURE_DISPLAY_NAMES, load_config
-from app.rag.retriever import RetrievedChunk
-from app.tui.widgets import ChatMessage, FeatureToggleModal, RagSelectionModal, StatusBar
-
-HELP_TEXT = """Available commands:
-  /help          Show this help
-  /status        Show model and active features
-  /features      Open feature toggle menu (auto-saves to config.yaml)
-  /features list Show all feature flags and their state
-  /rag [all|doc1,doc2,...]
-                 Toggle RAG and select documents (e.g., /rag all or /rag doc1.txt,doc2.txt)
-  /reload-soul   Reload SOUL.md and rebuild the system prompt
-  /exit          Quit the app
-
-Type anything else to chat. Ctrl+Q also quits."""
+from app.rag.retriever import RetrievedChunk, Retriever
+from app.tui.widgets import (
+    ChatMessage,
+    FeatureToggleModal,
+    RagSelectionModal,
+    SourcesModal,
+    StatusBar,
+)
 
 
 class SoulForgeApp(App):
@@ -71,6 +67,7 @@ class SoulForgeApp(App):
         self.status_bar.set_model(self.controller.model_name)
         self._refresh_features()
         self.status_bar.set_state("Loading model...")
+        self.status_bar.set_compute(UNKNOWN)
         self._write_message(
             "system",
             "Welcome to SoulForge TUI. Loading the model, please wait...\n"
@@ -115,11 +112,37 @@ class SoulForgeApp(App):
         finally:
             self.call_from_thread(self._generation_done)
 
+    @work(thread=True, exclusive=True, group="ingest")
+    def _run_ingest(self) -> None:
+        def on_progress(name: str, method: str, current: int, total: int) -> None:
+            self.call_from_thread(
+                self.status_bar.set_state,
+                f"Ingest {current}/{total}: {name} ({method})",
+            )
+
+        try:
+            result = self.controller.run_ingest(on_progress=on_progress)
+            lines = [result.summary()]
+            for note in result.errors:
+                lines.append(f"Note: {note}")
+            for skipped in result.skipped:
+                lines.append(f"Skipped: {skipped}")
+            if not self.controller.rag_enabled:
+                lines.append("Tip: run /rag on to enable retrieval.")
+            self.call_from_thread(self._write_message, "system", "\n".join(lines))
+        except Exception as error:  # noqa: BLE001
+            self.call_from_thread(
+                self._write_message, "system", f"Ingest failed: {error}"
+            )
+        finally:
+            self.call_from_thread(self._ingest_done)
+
     # --- worker callbacks (UI thread) ---------------------------------------
 
     def _on_models_loaded(self) -> None:
         self.models_ready = True
         self.status_bar.set_state("Ready")
+        self.status_bar.set_compute(self.controller.compute_backend)
         self.prompt.disabled = False
         self.prompt.placeholder = "Type a message, or /help"
         self.prompt.focus()
@@ -138,6 +161,12 @@ class SoulForgeApp(App):
         self.prompt.disabled = False
         self.prompt.focus()
         self._scroll_to_end()
+
+    def _ingest_done(self) -> None:
+        self.status_bar.set_state("Ready")
+        self.prompt.disabled = False
+        self.prompt.focus()
+        self._refresh_features()
 
     # --- helpers (UI thread) -------------------------------------------------
 
@@ -160,32 +189,66 @@ class SoulForgeApp(App):
         self.chat_view.scroll_end(animate=False)
 
     def _status_text(self) -> str:
+        stats = self.controller.get_rag_stats()
+
+        rag_info = ""
+        if stats.get("chunk_count", 0) or stats.get("sources"):
+            rag_info = (
+                f"\nRAG index: {stats.get('chunk_count', 0)} chunk(s), "
+                f"{len(stats.get('sources', []))} source(s)"
+            )
+
         return (
             f"Model: {self.controller.model_name}\n"
             f"Active features: {self.controller.features_summary()}\n"
+            f"Compute: {self.controller.compute_backend.label} "
+            f"({self.controller.compute_backend.detail})\n"
             f"State: {'ready' if self.models_ready else 'loading'}"
+            f"{rag_info}"
         )
 
     def _handle_rag_command(self, args: str) -> None:
         """Handle /rag command: toggle RAG and optionally select documents."""
+        arg = args.strip().lower()
+
+        if arg == "on":
+            self.controller.enable_rag()
+            available = self.controller.get_available_sources()
+            if not available:
+                self._write_message(
+                    "system",
+                    "RAG enabled, but no documents found.\nRun /ingest to index docs/.",
+                )
+            else:
+                self._write_message(
+                    "system",
+                    f"RAG enabled. Using all {len(available)} document(s).",
+                )
+            self._refresh_features()
+            return
+
+        if arg == "off":
+            self.controller.disable_rag()
+            self._write_message("system", "RAG disabled.")
+            self._refresh_features()
+            return
+
         if not args:
-            # Show interactive modal for document selection
             available = self.controller.get_available_sources()
             if not available:
                 if not self.controller.rag_enabled:
                     self.controller.toggle_rag()
                 self._write_message(
                     "system",
-                    "No documents found in the vector store.\nRun ingestDocs.py to index documents."
+                    "No documents found in the vector store.\nRun /ingest to index documents.",
                 )
             else:
-                # Push the modal and handle result asynchronously
                 modal = RagSelectionModal(available)
                 self.app.push_screen(modal, self._handle_rag_modal_result)
-        elif args.lower() == "all":
-            # Enable RAG with all documents
-            if not self.controller.rag_enabled:
-                self.controller.toggle_rag()
+            return
+
+        if arg == "all":
+            self.controller.enable_rag()
             available = self.controller.get_available_sources()
             if not available:
                 self._write_message("system", "No documents found in the vector store.")
@@ -193,48 +256,49 @@ class SoulForgeApp(App):
                 self.controller.set_rag_sources(available)
                 self._write_message(
                     "system",
-                    f"RAG enabled using all {len(available)} document(s):\n  " + "\n  ".join(available)
+                    f"RAG enabled using all {len(available)} document(s):\n  "
+                    + "\n  ".join(available),
                 )
-        else:
-            # Enable RAG with specific documents
-            requested = [doc.strip() for doc in args.split(",")]
-            available = self.controller.get_available_sources()
-            valid_docs = [doc for doc in requested if doc in available]
-            invalid_docs = [doc for doc in requested if doc not in available]
-            
-            if not valid_docs:
-                self._write_message(
-                    "system",
-                    f"None of the requested documents found.\nAvailable: {', '.join(available) if available else 'none'}"
-                )
-                return
-            
-            if not self.controller.rag_enabled:
-                self.controller.toggle_rag()
-            self.controller.set_rag_sources(valid_docs)
-            msg = f"RAG enabled using {len(valid_docs)} document(s):\n  " + "\n  ".join(valid_docs)
-            if invalid_docs:
-                msg += f"\n\nNot found: {', '.join(invalid_docs)}\nAvailable: {', '.join(available)}"
-            self._write_message("system", msg)
+            self._refresh_features()
+            return
+
+        requested = [doc.strip() for doc in args.split(",")]
+        available = self.controller.get_available_sources()
+        valid_docs = [doc for doc in requested if doc in available]
+        invalid_docs = [doc for doc in requested if doc not in available]
+
+        if not valid_docs:
+            self._write_message(
+                "system",
+                f"None of the requested documents found.\n"
+                f"Available: {', '.join(available) if available else 'none'}",
+            )
+            return
+
+        self.controller.enable_rag(valid_docs)
+        msg = (
+            f"RAG enabled using {len(valid_docs)} document(s):\n  "
+            + "\n  ".join(valid_docs)
+        )
+        if invalid_docs:
+            msg += f"\n\nNot found: {', '.join(invalid_docs)}\nAvailable: {', '.join(available)}"
+        self._write_message("system", msg)
         self._refresh_features()
 
     def _handle_rag_modal_result(self, selected: list[str] | None) -> None:
         """Handle the result from the RAG selection modal."""
         if selected is None:
-            # User cancelled
             self._write_message("system", "RAG selection cancelled.")
             return
 
-        # Enable RAG and set selected sources
-        if not self.controller.rag_enabled:
-            self.controller.toggle_rag()
-        
-        self.controller.set_rag_sources(selected)
-        
+        self.controller.enable_rag(selected)
+
         if len(selected) == len(self.controller.get_available_sources()):
             msg = "RAG enabled using all documents."
         else:
-            msg = f"RAG enabled using {len(selected)} document(s):\n  " + "\n".join(selected)
+            msg = f"RAG enabled using {len(selected)} document(s):\n  " + "\n  ".join(
+                selected
+            )
         self._write_message("system", msg)
         self._refresh_features()
 
@@ -292,6 +356,19 @@ class SoulForgeApp(App):
         )
         self._refresh_features()
 
+    def _handle_ingest_command(self) -> None:
+        if not self.models_ready:
+            self._write_message("system", "Model is still loading, please wait.")
+            return
+        self.status_bar.set_state("Ingesting...")
+        self.prompt.disabled = True
+        self._run_ingest()
+
+    def _handle_sources_command(self) -> None:
+        chunks = self.controller.last_retrieved_chunks
+        modal = SourcesModal(chunks)
+        self.app.push_screen(modal)
+
     # --- input handling ------------------------------------------------------
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -321,9 +398,14 @@ class SoulForgeApp(App):
         if command in ("/exit", "/quit"):
             self.exit()
         elif command == "/help":
-            self._write_message("system", HELP_TEXT)
+            help_text = format_help_text() + "\n\nCtrl+Q also quits."
+            self._write_message("system", help_text)
         elif command == "/status":
             self._write_message("system", self._status_text())
+        elif command == "/ingest":
+            self._handle_ingest_command()
+        elif command == "/sources":
+            self._handle_sources_command()
         elif command == "/rag":
             self._handle_rag_command(args)
         elif command == "/features":

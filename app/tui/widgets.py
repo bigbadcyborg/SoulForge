@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from rich.text import Text
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Label, Static
 
+from app.core.compute_backend import ComputeBackend, UNKNOWN
 from app.core.feature_state import FEATURE_KEYS
+from app.rag.retriever import RetrievedChunk, Retriever
 
 ROLE_LABELS = {
     "user": "You",
@@ -47,28 +49,41 @@ class ChatMessage(Static):
         return renderable
 
 
-class StatusBar(Static):
-    """Bottom status bar showing model name, active features, and state."""
+class StatusBar(Horizontal):
+    """Bottom status bar: model/features/state on the left, GPU/CPU badge on the right."""
 
     def __init__(self) -> None:
+        super().__init__()
         self._model = "—"
         self._features = "—"
         self._state = "Starting"
-        super().__init__(self._build())
+        self._compute = UNKNOWN
+
+    def compose(self):
+        yield Static(id="status-left")
+        yield Static(id="status-compute")
+
+    def on_mount(self) -> None:
+        self._refresh_left()
+        self._refresh_compute()
 
     def set_model(self, model: str) -> None:
         self._model = model
-        self.update(self._build())
+        self._refresh_left()
 
     def set_features(self, features: str) -> None:
         self._features = features
-        self.update(self._build())
+        self._refresh_left()
 
     def set_state(self, state: str) -> None:
         self._state = state
-        self.update(self._build())
+        self._refresh_left()
 
-    def _build(self) -> Text:
+    def set_compute(self, backend: ComputeBackend) -> None:
+        self._compute = backend
+        self._refresh_compute()
+
+    def _build_left(self) -> Text:
         text = Text()
         text.append(" model: ", style="dim")
         text.append(self._model, style="bold")
@@ -77,6 +92,23 @@ class StatusBar(Static):
         text.append("  │  ", style="dim")
         text.append(self._state, style="bold magenta")
         return text
+
+    def _refresh_left(self) -> None:
+        left = self.query_one("#status-left", Static)
+        left.update(self._build_left())
+
+    def _refresh_compute(self) -> None:
+        badge = self.query_one("#status-compute", Static)
+        badge.remove_class("mode-gpu", "mode-cpu", "mode-unknown")
+        badge.add_class(f"mode-{self._compute.mode}")
+        text = Text()
+        style = {
+            "gpu": "bold green",
+            "cpu": "bold yellow",
+            "unknown": "dim",
+        }.get(self._compute.mode, "bold white")
+        text.append(self._compute.label, style=style)
+        badge.update(text)
 
 
 class RagSelectionModal(ModalScreen):
@@ -195,3 +227,24 @@ class FeatureToggleModal(ModalScreen):
             self.dismiss(selected)
         elif event.button.id == "cancel-button":
             self.dismiss(None)
+
+
+class SourcesModal(ModalScreen):
+    """Modal for inspecting retrieved chunks from the last question."""
+
+    def __init__(self, chunks: list[RetrievedChunk]) -> None:
+        super().__init__()
+        self.chunks = chunks
+
+    def compose(self):
+        with Vertical(id="sources-modal-container"):
+            yield Label("Retrieved sources (last question):")
+            with VerticalScroll(id="sources-scroll"):
+                text = Retriever.format_sources_detail(self.chunks)
+                yield Static(text, id="sources-content")
+            with Container(id="button-container"):
+                yield Button("Close", id="close-button", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss()
