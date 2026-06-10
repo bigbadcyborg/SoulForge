@@ -76,3 +76,42 @@ RagSelectionModal {
 #button-container Button {
     margin: 0 1;
 }
+
+/* Feature Toggle Modal */
+FeatureToggleModal {
+    align: center middle;
+}
+
+#feature-modal-container {
+    width: 72;
+    height: auto;
+    max-height: 90%;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+    overflow-y: auto;
+}
+
+#feature-modal-container > Label {
+    margin-bottom: 1;
+    color: $text;
+}
+
+.feature-row {
+    width: 100%;
+    height: auto;
+    margin: 0 0 1 0;
+    align: left top;
+}
+
+.feature-row Checkbox {
+    width: auto;
+    min-width: 16;
+    margin: 0 1 0 0;
+}
+
+.feature-desc {
+    width: 1fr;
+    color: $text-muted;
+    padding: 0 0 0 1;
+}

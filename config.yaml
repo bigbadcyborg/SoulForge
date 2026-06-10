@@ -1,18 +1,19 @@
 model:
-  chatModelPath: "./models/NemoMix-Unleashed-12B-Q4_K_M.gguf"
-  embeddingModelPath: "./models/embedding-model.gguf"
+  chatModelPath: ./models/NemoMix-Unleashed-12B-Q4_K_M.gguf
+  embeddingModelPath: ./models/embedding-model.gguf
   contextSize: 8192
   gpuLayers: -1
   threads: 8
-  chatFormat: "mistral-instruct"
-
+  chatFormat: mistral-instruct
 generation:
   temperature: 0.75
   topP: 0.95
   repeatPenalty: 1.1
   maxTokens: 700
-  stop: ["</s>", "User:", "You:"]
-
+  stop:
+  - </s>
+  - 'User:'
+  - 'You:'
 features:
   soul: true
   rag: false
@@ -22,30 +23,26 @@ features:
   kanban: false
   streaming: true
   showSources: true
-
 rag:
-  dbPath: "./chromaDb"
-  docsPath: "./docs"
-  collectionName: "localDocs"
+  dbPath: ./chromaDb
+  docsPath: ./docs
+  collectionName: localDocs
   topK: 5
   chunkSize: 1200
   chunkOverlap: 200
-
 memory:
-  userFile: "./app/memory/user.md"
-  memoryFile: "./app/memory/memory.md"
-  sessionFile: "./app/memory/session.md"
+  userFile: ./app/memory/user.md
+  memoryFile: ./app/memory/memory.md
+  sessionFile: ./app/memory/session.md
   updateEveryTurns: 10
   maxUserChars: 3000
   maxMemoryChars: 6000
   maxSessionChars: 4000
-
 skills:
-  activePath: "./app/skills/active"
-  archivedPath: "./app/skills/archived"
-  registryPath: "./app/skills/registry.json"
+  activePath: ./app/skills/active
+  archivedPath: ./app/skills/archived
+  registryPath: ./app/skills/registry.json
   autoCreate: false
   minSuccessfulRepeats: 3
-
 tasks:
-  kanbanPath: "./app/tasks/kanban.json"
+  kanbanPath: ./app/tasks/kanban.json

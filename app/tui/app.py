@@ -1,4 +1,4 @@
-"""SoulForge Textual TUI (Iteration 2).
+"""SoulForge Textual TUI (Iteration 2+).
 
 A scrollable chat history, an input box, and a status bar. Model loading and
 token generation run on worker threads so the UI stays responsive; widget
@@ -15,13 +15,15 @@ from textual.containers import VerticalScroll
 from textual.widgets import Input
 
 from app.core.chat_controller import ChatController
-from app.core.config import load_config
+from app.core.config import FEATURE_DISPLAY_NAMES, load_config
 from app.rag.retriever import RetrievedChunk
-from app.tui.widgets import ChatMessage, RagSelectionModal, StatusBar
+from app.tui.widgets import ChatMessage, FeatureToggleModal, RagSelectionModal, StatusBar
 
 HELP_TEXT = """Available commands:
   /help          Show this help
   /status        Show model and active features
+  /features      Open feature toggle menu (auto-saves to config.yaml)
+  /features list Show all feature flags and their state
   /rag [all|doc1,doc2,...]
                  Toggle RAG and select documents (e.g., /rag all or /rag doc1.txt,doc2.txt)
   /reload-soul   Reload SOUL.md and rebuild the system prompt
@@ -62,9 +64,12 @@ class SoulForgeApp(App):
     def status_bar(self) -> StatusBar:
         return self.query_one(StatusBar)
 
+    def _refresh_features(self) -> None:
+        self.status_bar.set_features(self.controller.features_summary())
+
     def on_mount(self) -> None:
         self.status_bar.set_model(self.controller.model_name)
-        self.status_bar.set_features(self.controller.features_summary())
+        self._refresh_features()
         self.status_bar.set_state("Loading model...")
         self._write_message(
             "system",
@@ -88,14 +93,14 @@ class SoulForgeApp(App):
     def _generate(self, user_input: str) -> None:
         try:
             chunks = self.controller.add_user_turn(user_input)
-            if self.controller.config.features.show_sources and chunks:
+            if self.controller.features.is_enabled("show_sources") and chunks:
                 self.call_from_thread(self._write_sources, chunks)
 
             message: ChatMessage = self.call_from_thread(
                 self._new_assistant_message
             )
 
-            if self.controller.config.features.streaming:
+            if self.controller.features.is_enabled("streaming"):
                 for token in self.controller.stream_reply():
                     self.call_from_thread(message.append, token)
                     self.call_from_thread(self._scroll_to_end)
@@ -211,6 +216,7 @@ class SoulForgeApp(App):
             if invalid_docs:
                 msg += f"\n\nNot found: {', '.join(invalid_docs)}\nAvailable: {', '.join(available)}"
             self._write_message("system", msg)
+        self._refresh_features()
 
     def _handle_rag_modal_result(self, selected: list[str] | None) -> None:
         """Handle the result from the RAG selection modal."""
@@ -226,10 +232,65 @@ class SoulForgeApp(App):
         self.controller.set_rag_sources(selected)
         
         if len(selected) == len(self.controller.get_available_sources()):
-            msg = f"RAG enabled using all documents."
+            msg = "RAG enabled using all documents."
         else:
-            msg = f"RAG enabled using {len(selected)} document(s):\n  " + "\n  ".join(selected)
+            msg = f"RAG enabled using {len(selected)} document(s):\n  " + "\n".join(selected)
         self._write_message("system", msg)
+        self._refresh_features()
+
+    def _handle_features_command(self, args: str) -> None:
+        """Handle /features command: open modal or list flags."""
+        if args.lower() == "list":
+            self._write_message(
+                "system",
+                "Feature flags:\n" + self.controller.features.format_list(),
+            )
+            return
+
+        if args:
+            parts = args.split()
+            if len(parts) == 2 and parts[1].lower() in ("on", "off"):
+                key, state = parts[0], parts[1].lower() == "on"
+                try:
+                    self.controller.set_feature(key, state)
+                    resolved = self.controller.features._resolve_key(key)
+                    label = FEATURE_DISPLAY_NAMES[resolved]
+                except KeyError as error:
+                    self._write_message("system", str(error))
+                    return
+                self._write_message(
+                    "system",
+                    f"Feature '{label}' set to {'on' if state else 'off'}.",
+                )
+                self._refresh_features()
+                return
+
+            self._write_message(
+                "system",
+                "Usage: /features | /features list | /features <name> on|off",
+            )
+            return
+
+        modal = FeatureToggleModal(self.controller.features.as_dict())
+        self.app.push_screen(modal, self._handle_features_modal_result)
+
+    def _handle_features_modal_result(self, selected: dict[str, bool] | None) -> None:
+        """Apply feature toggles chosen in the modal."""
+        if selected is None:
+            self._write_message("system", "Feature toggle cancelled.")
+            return
+
+        changed = self.controller.apply_features(selected)
+        if not changed:
+            self._write_message("system", "No feature changes.")
+            return
+
+        labels = [FEATURE_DISPLAY_NAMES.get(key, key) for key in changed]
+        self._write_message(
+            "system",
+            "Updated features: " + ", ".join(labels) + "\n(saved to config.yaml)",
+        )
+        self._refresh_features()
 
     # --- input handling ------------------------------------------------------
 
@@ -265,6 +326,8 @@ class SoulForgeApp(App):
             self._write_message("system", self._status_text())
         elif command == "/rag":
             self._handle_rag_command(args)
+        elif command == "/features":
+            self._handle_features_command(args)
         elif command == "/reload-soul":
             if not self.models_ready:
                 self._write_message("system", "Model is still loading, please wait.")

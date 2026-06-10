@@ -9,13 +9,17 @@ This project is designed to run locally (Windows/WSL) with CUDA acceleration for
 * **GGUF Inference**: Local `llama-cpp-python` backend for high-performance GGUF models.
 * **Textual TUI**: A structured terminal user interface with chat history, status bar, and interactive commands.
 * **Persona Control**: `SOUL.md` defines your assistant's identity, personality, and tone.
-* **Toggleable RAG**: Enable/disable RAG at runtime with `/rag`.
+* **Runtime Feature Toggles**: Enable or disable RAG, memory, SOUL, streaming, and more via `/features` (auto-saves to `config.yaml`).
+* **Toggleable RAG**: Enable/disable RAG at runtime with `/rag` or the feature menu.
 * **Interactive Doc Selection**: Use `/rag` to select specific documents from your vector store via a checkbox-based modal.
 * **WSL 2 & CUDA support**: Optimized for NVIDIA GPUs (including Blackwell/RTX 5090) within WSL Ubuntu.
 * **Persona Hot-Reload**: Update `SOUL.md` and reload the character instantly with `/reload-soul`.
 
 ## Commands
 
+* `/features`: Open the feature toggle menu (TUI) or list flags (CLI). Changes auto-save to `config.yaml`.
+* `/features list`: Show all feature flags and their on/off state.
+* `/features <name> on|off`: Toggle a single feature (e.g., `/features rag on`, `/features soul off`).
 * `/rag`: Toggle RAG on/off or open document selection modal.
 * `/rag all`: Enable RAG using all documents in the store.
 * `/rag doc1.txt,doc2.txt`: Enable RAG filter for specific document names.

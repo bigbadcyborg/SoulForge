@@ -7,6 +7,8 @@ paths or magic numbers.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -62,6 +64,31 @@ class FeatureConfig:
     kanban: bool = False
     streaming: bool = True
     show_sources: bool = True
+
+
+# Maps FeatureConfig attribute names to config.yaml camelCase keys.
+FEATURE_YAML_KEYS: dict[str, str] = {
+    "soul": "soul",
+    "rag": "rag",
+    "memory": "memory",
+    "skills": "skills",
+    "curator": "curator",
+    "kanban": "kanban",
+    "streaming": "streaming",
+    "show_sources": "showSources",
+}
+
+# Short labels used in the status bar and /features list.
+FEATURE_DISPLAY_NAMES: dict[str, str] = {
+    "soul": "soul",
+    "rag": "rag",
+    "memory": "memory",
+    "skills": "skills",
+    "curator": "curator",
+    "kanban": "kanban",
+    "show_sources": "sources",
+    "streaming": "streaming",
+}
 
 
 @dataclass
@@ -229,3 +256,45 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         tasks=tasks,
         raw=data,
     )
+
+
+def features_to_yaml_dict(features: FeatureConfig) -> dict[str, bool]:
+    """Convert a FeatureConfig to the camelCase dict written under ``features:``."""
+    return {
+        yaml_key: getattr(features, attr)
+        for attr, yaml_key in FEATURE_YAML_KEYS.items()
+    }
+
+
+def save_features(
+    config: AppConfig,
+    path: str | Path | None = None,
+) -> None:
+    """Persist the current feature flags to ``config.yaml`` (atomic write)."""
+    config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    else:
+        data = dict(config.raw) if config.raw else {}
+
+    data["features"] = features_to_yaml_dict(config.features)
+    config.raw = data
+
+    directory = config_path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+
+    fd, temp_path = tempfile.mkstemp(
+        dir=directory,
+        prefix=".config-",
+        suffix=".yaml.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(data, handle, default_flow_style=False, sort_keys=False)
+        os.replace(temp_path, config_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise

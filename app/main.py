@@ -13,19 +13,44 @@ from __future__ import annotations
 import argparse
 
 from app.core.chat_controller import ChatController
-from app.core.config import load_config
+from app.core.config import FEATURE_DISPLAY_NAMES, load_config
 
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit"}
 
 CLI_HELP = """Available commands:
   /help          Show this help
   /status        Show model and active features
+  /features      List feature flags (or: /features list)
+  /features <name> on|off
+                 Toggle a feature (auto-saves to config.yaml)
   /rag [all|doc1,doc2,...]
                  Toggle RAG and select documents (e.g., /rag all or /rag doc1.txt,doc2.txt)
   /reload-soul   Reload SOUL.md and rebuild the system prompt
   /exit or /quit Exit the chatbot
 
 Type anything else to chat."""
+
+
+def _handle_features_cli(controller: ChatController, args: str) -> None:
+    if not args or args.lower() == "list":
+        print("Feature flags:")
+        print(controller.features.format_list())
+        return
+
+    parts = args.split()
+    if len(parts) == 2 and parts[1].lower() in ("on", "off"):
+        key, state = parts[0], parts[1].lower() == "on"
+        try:
+            controller.set_feature(key, state)
+            resolved = controller.features._resolve_key(key)
+            label = FEATURE_DISPLAY_NAMES[resolved]
+        except KeyError as error:
+            print(error)
+            return
+        print(f"Feature '{label}' set to {'on' if state else 'off'}. (saved to config.yaml)")
+        return
+
+    print("Usage: /features | /features list | /features <name> on|off")
 
 
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
@@ -41,14 +66,18 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     elif command == "/status":
         print(f"Model: {controller.model_name}")
         print(f"Active features: {controller.features_summary()}")
+    elif command == "/features":
+        _handle_features_cli(controller, args)
     elif command == "/rag":
         if not args:
-            # Toggle RAG without arguments
             enabled = controller.toggle_rag()
             if enabled:
                 available = controller.get_available_sources()
                 if not available:
-                    print("RAG enabled, but no documents found in the vector store.\nRun ingestDocs.py to index documents.")
+                    print(
+                        "RAG enabled, but no documents found in the vector store.\n"
+                        "Run ingestDocs.py to index documents."
+                    )
                 else:
                     controller.set_rag_sources(available)
                     print(f"RAG enabled. Using all {len(available)} document(s):")
@@ -57,7 +86,6 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
             else:
                 print("RAG disabled.")
         elif args.lower() == "all":
-            # Enable RAG with all documents
             if not controller.rag_enabled:
                 controller.toggle_rag()
             available = controller.get_available_sources()
@@ -69,16 +97,18 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
                 for doc in available:
                     print(f"  - {doc}")
         else:
-            # Enable RAG with specific documents
             requested = [doc.strip() for doc in args.split(",")]
             available = controller.get_available_sources()
             valid_docs = [doc for doc in requested if doc in available]
             invalid_docs = [doc for doc in requested if doc not in available]
-            
+
             if not valid_docs:
-                print(f"None of the requested documents found.\nAvailable: {', '.join(available) if available else 'none'}")
+                print(
+                    f"None of the requested documents found.\n"
+                    f"Available: {', '.join(available) if available else 'none'}"
+                )
                 return True
-            
+
             if not controller.rag_enabled:
                 controller.toggle_rag()
             controller.set_rag_sources(valid_docs)
@@ -125,12 +155,12 @@ def run_cli() -> None:
             break
 
         chunks = controller.add_user_turn(user_input)
-        if config.features.show_sources and chunks:
+        if controller.features.is_enabled("show_sources") and chunks:
             print("\nSources:")
             for chunk in chunks:
                 print(f"  - {chunk.source} (chunk {chunk.chunk_index})")
 
-        if config.features.streaming:
+        if controller.features.is_enabled("streaming"):
             print("\nBot: ", end="", flush=True)
             for token in controller.stream_reply():
                 print(token, end="", flush=True)

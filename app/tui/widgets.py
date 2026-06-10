@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from rich.text import Text
-from textual.containers import Container, Vertical
+from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Label, Static
+
+from app.core.feature_state import FEATURE_KEYS
 
 ROLE_LABELS = {
     "user": "You",
@@ -133,3 +135,63 @@ class RagSelectionModal(ModalScreen):
             for sanitized_id in self.id_to_source.keys():
                 checkbox = self.query_one(f"#{sanitized_id}", Checkbox)
                 checkbox.value = event.checkbox.value
+
+
+FEATURE_TOGGLE_LABELS: dict[str, str] = {
+    "soul": "SOUL (persona)",
+    "rag": "RAG",
+    "memory": "Memory",
+    "skills": "Skills",
+    "curator": "Curator",
+    "kanban": "Kanban",
+    "show_sources": "Show sources",
+    "streaming": "Streaming",
+}
+
+FEATURE_TOGGLE_DESCRIPTIONS: dict[str, str] = {
+    "soul": "Inject SOUL.md persona, tone, and behavior into the system prompt.",
+    "rag": "Retrieve relevant chunks from indexed docs and ground replies in them.",
+    "memory": "Load user.md, memory.md, and session.md into the system prompt.",
+    "skills": "Inject reusable workflow skills into prompts. (coming soon)",
+    "curator": "Review and maintain skills and memory quality. (coming soon)",
+    "kanban": "Track tasks on a local Kanban board. (coming soon)",
+    "show_sources": "List retrieved document sources after each reply.",
+    "streaming": "Stream model tokens into the chat as they are generated.",
+}
+
+
+class FeatureToggleModal(ModalScreen):
+    """Modal for toggling runtime feature flags."""
+
+    def __init__(self, current_state: dict[str, bool]) -> None:
+        super().__init__()
+        self.current_state = current_state
+
+    def compose(self):
+        with Vertical(id="feature-modal-container"):
+            yield Label("Feature toggles (changes auto-save to config.yaml):")
+            for key in FEATURE_KEYS:
+                checkbox_id = f"feature-{key}"
+                label = FEATURE_TOGGLE_LABELS.get(key, key)
+                description = FEATURE_TOGGLE_DESCRIPTIONS.get(key, "")
+                with Horizontal(classes="feature-row"):
+                    yield Checkbox(label, id=checkbox_id, value=self.current_state.get(key, False))
+                    yield Static(description, classes="feature-desc")
+            with Container(id="button-container"):
+                yield Button("OK", id="ok-button", variant="primary")
+                yield Button("Cancel", id="cancel-button")
+
+    def on_mount(self) -> None:
+        for key in FEATURE_KEYS:
+            checkbox = self.query_one(f"#feature-{key}", Checkbox)
+            checkbox.value = self.current_state.get(key, False)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok-button":
+            selected = {
+                key: self.query_one(f"#feature-{key}", Checkbox).value
+                for key in FEATURE_KEYS
+            }
+            self.dismiss(selected)
+        elif event.button.id == "cancel-button":
+            self.dismiss(None)
