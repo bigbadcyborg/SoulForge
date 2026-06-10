@@ -1,0 +1,5 @@
+# Core runtime dependencies for SoulForge TUI.
+# llama-cpp-python is built from source with CUDA on WSL (see README).
+llama-cpp-python
+chromadb
+PyYAML

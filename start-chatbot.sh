@@ -9,6 +9,6 @@ export LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH
 
 source .venv-wsl/bin/activate
 
-python chatbot.py
+python -m app.main
 
 exec bash

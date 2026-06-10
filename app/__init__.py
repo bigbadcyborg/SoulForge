@@ -1,0 +1,1 @@
+"""SoulForge TUI application package."""

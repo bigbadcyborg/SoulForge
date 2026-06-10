@@ -1,0 +1,231 @@
+"""Configuration loading for SoulForge TUI.
+
+All tunable values live in ``config.yaml`` at the project root. Core logic
+should depend only on the typed dataclasses produced here, never on hardcoded
+paths or magic numbers.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+
+
+def resolve_path(value: str | Path) -> Path:
+    """Resolve a possibly-relative config path against the project root."""
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return (PROJECT_ROOT / path).resolve()
+
+
+@dataclass
+class ModelConfig:
+    chat_model_path: str
+    embedding_model_path: str
+    context_size: int = 8192
+    gpu_layers: int = -1
+    threads: int = 8
+    chat_format: str = "mistral-instruct"
+
+    @property
+    def chat_model(self) -> Path:
+        return resolve_path(self.chat_model_path)
+
+    @property
+    def embedding_model(self) -> Path:
+        return resolve_path(self.embedding_model_path)
+
+
+@dataclass
+class GenerationConfig:
+    temperature: float = 0.75
+    top_p: float = 0.95
+    repeat_penalty: float = 1.1
+    max_tokens: int = 700
+    stop: list[str] = field(default_factory=lambda: ["</s>", "User:", "You:"])
+
+
+@dataclass
+class FeatureConfig:
+    soul: bool = True
+    rag: bool = True
+    memory: bool = True
+    skills: bool = False
+    curator: bool = False
+    kanban: bool = False
+    streaming: bool = True
+    show_sources: bool = True
+
+
+@dataclass
+class RagConfig:
+    db_path: str = "./chromaDb"
+    docs_path: str = "./docs"
+    collection_name: str = "localDocs"
+    top_k: int = 5
+    chunk_size: int = 1200
+    chunk_overlap: int = 200
+
+    @property
+    def db_dir(self) -> Path:
+        return resolve_path(self.db_path)
+
+    @property
+    def docs_dir(self) -> Path:
+        return resolve_path(self.docs_path)
+
+
+@dataclass
+class MemoryConfig:
+    user_file: str = "./app/memory/user.md"
+    memory_file: str = "./app/memory/memory.md"
+    session_file: str = "./app/memory/session.md"
+    update_every_turns: int = 10
+    max_user_chars: int = 3000
+    max_memory_chars: int = 6000
+    max_session_chars: int = 4000
+
+    @property
+    def user_path(self) -> Path:
+        return resolve_path(self.user_file)
+
+    @property
+    def memory_path(self) -> Path:
+        return resolve_path(self.memory_file)
+
+    @property
+    def session_path(self) -> Path:
+        return resolve_path(self.session_file)
+
+
+@dataclass
+class SkillsConfig:
+    active_path: str = "./app/skills/active"
+    archived_path: str = "./app/skills/archived"
+    registry_path: str = "./app/skills/registry.json"
+    auto_create: bool = False
+    min_successful_repeats: int = 3
+
+
+@dataclass
+class TasksConfig:
+    kanban_path: str = "./app/tasks/kanban.json"
+
+
+@dataclass
+class AppConfig:
+    model: ModelConfig
+    generation: GenerationConfig
+    features: FeatureConfig
+    rag: RagConfig
+    memory: MemoryConfig
+    skills: SkillsConfig
+    tasks: TasksConfig
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+def _section(data: dict[str, Any], key: str) -> dict[str, Any]:
+    value = data.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def load_config(path: str | Path | None = None) -> AppConfig:
+    """Load and validate ``config.yaml`` into typed dataclasses."""
+    config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Config file not found: {config_path}. "
+            "Copy or create config.yaml at the project root."
+        )
+
+    with config_path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+
+    model_section = _section(data, "model")
+    model = ModelConfig(
+        chat_model_path=model_section.get(
+            "chatModelPath", "./models/NemoMix-Unleashed-12B-Q4_K_M.gguf"
+        ),
+        embedding_model_path=model_section.get(
+            "embeddingModelPath", "./models/embedding-model.gguf"
+        ),
+        context_size=model_section.get("contextSize", 8192),
+        gpu_layers=model_section.get("gpuLayers", -1),
+        threads=model_section.get("threads", 8),
+        chat_format=model_section.get("chatFormat", "mistral-instruct"),
+    )
+
+    gen_section = _section(data, "generation")
+    generation = GenerationConfig(
+        temperature=gen_section.get("temperature", 0.75),
+        top_p=gen_section.get("topP", 0.95),
+        repeat_penalty=gen_section.get("repeatPenalty", 1.1),
+        max_tokens=gen_section.get("maxTokens", 700),
+        stop=gen_section.get("stop", ["</s>", "User:", "You:"]),
+    )
+
+    feat_section = _section(data, "features")
+    features = FeatureConfig(
+        soul=feat_section.get("soul", True),
+        rag=feat_section.get("rag", True),
+        memory=feat_section.get("memory", True),
+        skills=feat_section.get("skills", False),
+        curator=feat_section.get("curator", False),
+        kanban=feat_section.get("kanban", False),
+        streaming=feat_section.get("streaming", True),
+        show_sources=feat_section.get("showSources", True),
+    )
+
+    rag_section = _section(data, "rag")
+    rag = RagConfig(
+        db_path=rag_section.get("dbPath", "./chromaDb"),
+        docs_path=rag_section.get("docsPath", "./docs"),
+        collection_name=rag_section.get("collectionName", "localDocs"),
+        top_k=rag_section.get("topK", 5),
+        chunk_size=rag_section.get("chunkSize", 1200),
+        chunk_overlap=rag_section.get("chunkOverlap", 200),
+    )
+
+    mem_section = _section(data, "memory")
+    memory = MemoryConfig(
+        user_file=mem_section.get("userFile", "./app/memory/user.md"),
+        memory_file=mem_section.get("memoryFile", "./app/memory/memory.md"),
+        session_file=mem_section.get("sessionFile", "./app/memory/session.md"),
+        update_every_turns=mem_section.get("updateEveryTurns", 10),
+        max_user_chars=mem_section.get("maxUserChars", 3000),
+        max_memory_chars=mem_section.get("maxMemoryChars", 6000),
+        max_session_chars=mem_section.get("maxSessionChars", 4000),
+    )
+
+    skills_section = _section(data, "skills")
+    skills = SkillsConfig(
+        active_path=skills_section.get("activePath", "./app/skills/active"),
+        archived_path=skills_section.get("archivedPath", "./app/skills/archived"),
+        registry_path=skills_section.get("registryPath", "./app/skills/registry.json"),
+        auto_create=skills_section.get("autoCreate", False),
+        min_successful_repeats=skills_section.get("minSuccessfulRepeats", 3),
+    )
+
+    tasks_section = _section(data, "tasks")
+    tasks = TasksConfig(
+        kanban_path=tasks_section.get("kanbanPath", "./app/tasks/kanban.json"),
+    )
+
+    return AppConfig(
+        model=model,
+        generation=generation,
+        features=features,
+        rag=rag,
+        memory=memory,
+        skills=skills,
+        tasks=tasks,
+        raw=data,
+    )
