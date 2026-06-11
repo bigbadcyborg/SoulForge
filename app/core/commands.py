@@ -94,6 +94,11 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "/memory-reject",
         "Discard the pending memory suggestion",
     ),
+    CommandHelp(
+        "Skills",
+        "/skills",
+        "Open the skill viewer menu (TUI); browse, create, or archive skills",
+    ),
 )
 
 
