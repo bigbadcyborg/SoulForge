@@ -24,6 +24,7 @@ from app.tui.widgets import (
     ChatMessage,
     FeatureToggleModal,
     MemoryEditModal,
+    MemoryReviewModal,
     MemoryViewerModal,
     RagSelectionModal,
     SourcesModal,
@@ -108,6 +109,13 @@ class SoulForgeApp(App):
                 reply = self.controller.full_reply()
                 self.call_from_thread(message.set_text, reply)
                 self.call_from_thread(self._scroll_to_end)
+
+            self.call_from_thread(self.status_bar.set_state, "Reviewing memory...")
+            review = self.controller.complete_turn()
+            if review.message:
+                self.call_from_thread(self._write_message, "system", review.message)
+            if review.has_suggestion and self.controller.pending_suggestion is not None:
+                self.call_from_thread(self._open_memory_review_modal)
         except Exception as error:  # noqa: BLE001 - surface generation failure
             self.call_from_thread(
                 self._write_message, "system", f"Generation error: {error}"
@@ -206,6 +214,8 @@ class SoulForgeApp(App):
             f"Active features: {self.controller.features_summary()}\n"
             f"Compute: {self.controller.compute_backend.label} "
             f"({self.controller.compute_backend.detail})\n"
+            f"Memory turns: {self.controller.turn_count} "
+            f"(review every {self.controller.config.memory.update_every_turns})\n"
             f"State: {'ready' if self.models_ready else 'loading'}"
             f"{rag_info}"
         )
@@ -428,6 +438,75 @@ class SoulForgeApp(App):
         self._refresh_features()
         self._write_message("system", "Memory injection disabled.")
 
+    def _open_memory_review_modal(self) -> None:
+        suggestion = self.controller.pending_suggestion
+        if suggestion is None:
+            self._write_message("system", "No pending memory suggestion.")
+            return
+        limit = self.controller.memory_manager.limits()[suggestion.section]
+        modal = MemoryReviewModal(suggestion, limit)
+        self.app.push_screen(modal, self._handle_memory_review_result)
+
+    def _handle_memory_review_result(self, action: str | None) -> None:
+        if action is None:
+            return
+        if action == "reject":
+            self.controller.reject_memory_suggestion()
+            self._write_message("system", "Memory suggestion rejected.")
+            return
+        if action == "accept":
+            self._accept_pending_memory_suggestion()
+            return
+        if action == "edit":
+            suggestion = self.controller.pending_suggestion
+            if suggestion is None:
+                return
+            limit = self.controller.memory_manager.limits()[suggestion.section]
+            modal = MemoryEditModal(
+                suggestion.section,
+                suggestion.proposed_content,
+                limit,
+            )
+            self.app.push_screen(modal, self._handle_memory_review_edit_result)
+
+    def _handle_memory_review_edit_result(self, result: tuple[str, str] | None) -> None:
+        if result is None:
+            self._write_message("system", "Memory edit cancelled. Suggestion still pending.")
+            return
+        _section, text = result
+        self._accept_pending_memory_suggestion(text)
+
+    def _accept_pending_memory_suggestion(self, content: str | None = None) -> None:
+        try:
+            _, was_compacted = self.controller.accept_memory_suggestion(content)
+        except ValueError as error:
+            self._write_message("system", str(error))
+            return
+
+        message = "Memory suggestion saved."
+        if was_compacted:
+            message += " Content was compacted to fit the character limit."
+        self._write_message("system", message)
+
+    def _handle_memory_review_command(self) -> None:
+        if self.controller.pending_suggestion is None:
+            self._write_message("system", "No pending memory suggestion.")
+            return
+        self._open_memory_review_modal()
+
+    def _handle_memory_accept_command(self) -> None:
+        if self.controller.pending_suggestion is None:
+            self._write_message("system", "No pending memory suggestion.")
+            return
+        self._accept_pending_memory_suggestion()
+
+    def _handle_memory_reject_command(self) -> None:
+        if self.controller.pending_suggestion is None:
+            self._write_message("system", "No pending memory suggestion.")
+            return
+        self.controller.reject_memory_suggestion()
+        self._write_message("system", "Memory suggestion rejected.")
+
     # --- input handling ------------------------------------------------------
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -483,6 +562,12 @@ class SoulForgeApp(App):
             self._handle_memory_on_command()
         elif command == "/memory-off":
             self._handle_memory_off_command()
+        elif command == "/memory-review":
+            self._handle_memory_review_command()
+        elif command == "/memory-accept":
+            self._handle_memory_accept_command()
+        elif command == "/memory-reject":
+            self._handle_memory_reject_command()
         else:
             self._write_message(
                 "system", f"Unknown command: {command}. Type /help."

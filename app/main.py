@@ -174,6 +174,32 @@ def _handle_memory_edit_cli(controller: ChatController, args: str) -> None:
         print("Warning: content was truncated to fit the character limit.")
 
 
+def _handle_memory_review_cli(controller: ChatController) -> None:
+    print(controller.get_memory_review())
+
+
+def _handle_memory_accept_cli(controller: ChatController) -> None:
+    if controller.pending_suggestion is None:
+        print("No pending memory suggestion.")
+        return
+    try:
+        _, was_compacted = controller.accept_memory_suggestion()
+    except ValueError as error:
+        print(error)
+        return
+    print("Memory suggestion saved.")
+    if was_compacted:
+        print("Note: content was compacted to fit the character limit.")
+
+
+def _handle_memory_reject_cli(controller: ChatController) -> None:
+    if controller.pending_suggestion is None:
+        print("No pending memory suggestion.")
+        return
+    controller.reject_memory_suggestion()
+    print("Memory suggestion rejected.")
+
+
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     """Handle CLI commands. Return True if should continue, False if should exit."""
     parts = cmd.split(maxsplit=1)
@@ -189,6 +215,10 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         print(f"Model: {controller.model_name}")
         print(f"Active features: {controller.features_summary()}")
         print(f"Compute: {backend.label} ({backend.detail})")
+        print(
+            f"Memory turns: {controller.turn_count} "
+            f"(review every {controller.config.memory.update_every_turns})"
+        )
     elif command == "/features":
         _handle_features_cli(controller, args)
     elif command == "/ingest":
@@ -210,6 +240,12 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     elif command == "/memory-off":
         controller.disable_memory()
         print("Memory injection disabled.")
+    elif command == "/memory-review":
+        _handle_memory_review_cli(controller)
+    elif command == "/memory-accept":
+        _handle_memory_accept_cli(controller)
+    elif command == "/memory-reject":
+        _handle_memory_reject_cli(controller)
     else:
         print(f"Unknown command: {command}. Type /help for available commands.")
 
@@ -257,6 +293,12 @@ def run_cli() -> None:
             print()
         else:
             print(f"\nBot: {controller.full_reply()}")
+
+        review = controller.complete_turn()
+        if review.message:
+            print(f"\n[System] {review.message}")
+            if review.has_suggestion and controller.pending_suggestion is not None:
+                print("Run /memory-review, /memory-accept, or /memory-reject.")
 
 
 def main() -> None:

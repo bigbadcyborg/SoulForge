@@ -79,6 +79,21 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "/memory-off",
         "Disable memory injection (equivalent to /features memory off)",
     ),
+    CommandHelp(
+        "Memory",
+        "/memory-review",
+        "Show pending memory update suggestion",
+    ),
+    CommandHelp(
+        "Memory",
+        "/memory-accept",
+        "Save the pending suggestion to user.md or memory.md",
+    ),
+    CommandHelp(
+        "Memory",
+        "/memory-reject",
+        "Discard the pending memory suggestion",
+    ),
 )
 
 

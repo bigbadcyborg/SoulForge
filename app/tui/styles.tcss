@@ -227,3 +227,33 @@ MemoryEditModal {
     margin-bottom: 1;
     color: $text-muted;
 }
+
+/* Memory Review Modal */
+MemoryReviewModal {
+    align: center middle;
+}
+
+#memory-review-container {
+    width: 72;
+    height: 26;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#memory-review-container > Label {
+    margin-bottom: 1;
+    color: $text;
+}
+
+#memory-review-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+#memory-review-content {
+    width: 100%;
+    color: $text-muted;
+}

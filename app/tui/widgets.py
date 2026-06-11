@@ -10,6 +10,7 @@ from textual.widgets import Button, Checkbox, Label, Static, TextArea
 from app.core.compute_backend import ComputeBackend, UNKNOWN
 from app.core.feature_state import FEATURE_KEYS
 from app.memory.memory_manager import SECTION_FILENAMES
+from app.memory.memory_reviewer import MemorySuggestion
 from app.rag.retriever import RetrievedChunk, Retriever
 
 ROLE_LABELS = {
@@ -305,3 +306,37 @@ class MemoryEditModal(ModalScreen):
             self.dismiss((self.section, text))
         elif event.button.id == "cancel-button":
             self.dismiss(None)
+
+
+class MemoryReviewModal(ModalScreen):
+    """Modal for reviewing and approving a pending memory suggestion."""
+
+    def __init__(self, suggestion: MemorySuggestion, max_chars: int) -> None:
+        super().__init__()
+        self.suggestion = suggestion
+        self.max_chars = max_chars
+
+    def compose(self):
+        filename = SECTION_FILENAMES.get(self.suggestion.section, f"{self.suggestion.section}.md")
+        count = len(self.suggestion.proposed_content)
+        preview = (
+            f"Rationale:\n{self.suggestion.rationale}\n\n"
+            f"Proposed {filename} ({count}/{self.max_chars} chars):\n"
+            f"{self.suggestion.proposed_content or '(empty)'}"
+        )
+        with Vertical(id="memory-review-container"):
+            yield Label(f"Memory review (turn {self.suggestion.turn_count}):")
+            with VerticalScroll(id="memory-review-scroll"):
+                yield Static(preview, id="memory-review-content")
+            with Container(id="button-container"):
+                yield Button("Accept", id="accept-button", variant="primary")
+                yield Button("Edit", id="edit-button")
+                yield Button("Reject", id="reject-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "accept-button":
+            self.dismiss("accept")
+        elif event.button.id == "edit-button":
+            self.dismiss("edit")
+        elif event.button.id == "reject-button":
+            self.dismiss("reject")

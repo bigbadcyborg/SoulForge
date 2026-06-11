@@ -7,6 +7,7 @@ logic UI-agnostic means the same code path powers every front end.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable, Iterator
 
 from app.core.compute_backend import ComputeBackend
@@ -15,10 +16,24 @@ from app.core.feature_state import FeatureStateManager
 from app.core.model_runtime import ModelRuntime
 from app.core.prompt_builder import PromptBuilder
 from app.memory.memory_manager import MemoryManager, MemorySnapshot
+from app.memory.memory_reviewer import (
+    MemorySuggestion,
+    format_suggestion_view,
+    generate_suggestion,
+    merge_and_compact,
+)
 from app.rag.ingest import IngestResult, ingest_documents
 from app.rag.retriever import Retriever, RetrievedChunk, get_store_stats
 
 SOUL_PATH = PROJECT_ROOT / "SOUL.md"
+
+
+@dataclass
+class TurnReviewResult:
+    turn_count: int
+    review_due: bool
+    has_suggestion: bool
+    message: str = ""
 
 
 def load_soul() -> str:
@@ -37,6 +52,9 @@ class ChatController:
         self.prompt_builder = PromptBuilder(config)
         self.memory_manager = MemoryManager(config)
         self.features = FeatureStateManager(config, on_change=self._on_feature_change)
+
+        self.turn_count: int = 0
+        self.pending_suggestion: MemorySuggestion | None = None
 
         # RAG is initialized lazily to avoid loading embedding model at startup
         self._retriever: Retriever | None = None
@@ -139,6 +157,100 @@ class ChatController:
     def disable_memory(self) -> None:
         """Disable memory injection."""
         self.set_feature("memory", False)
+
+    def complete_turn(self) -> TurnReviewResult:
+        """Increment turn counter and maybe generate a memory review suggestion."""
+        if not self.features.is_enabled("memory"):
+            return TurnReviewResult(self.turn_count, False, False)
+
+        self.turn_count += 1
+        return self._run_memory_review_if_due()
+
+    def maybe_trigger_memory_review(self) -> bool:
+        """Run review at the current turn count without incrementing."""
+        result = self._run_memory_review_if_due()
+        return result.has_suggestion and self.pending_suggestion is not None
+
+    def _run_memory_review_if_due(self) -> TurnReviewResult:
+        interval = self.config.memory.update_every_turns
+        review_due = interval > 0 and self.turn_count % interval == 0
+
+        if not review_due:
+            return TurnReviewResult(self.turn_count, False, False)
+
+        if self.pending_suggestion is not None:
+            return TurnReviewResult(
+                self.turn_count,
+                True,
+                True,
+                "Memory review already pending. Run /memory-review to view.",
+            )
+
+        snapshot = self.memory_manager.load()
+        suggestion, error = generate_suggestion(
+            self.runtime,
+            self.config,
+            self.messages,
+            snapshot,
+            self.turn_count,
+        )
+        if error:
+            return TurnReviewResult(
+                self.turn_count,
+                True,
+                False,
+                f"Memory review (turn {self.turn_count}) failed: {error}",
+            )
+
+        if suggestion is None:
+            return TurnReviewResult(
+                self.turn_count,
+                True,
+                False,
+                f"Memory review (turn {self.turn_count}): no new facts to save.",
+            )
+
+        self.pending_suggestion = suggestion
+        return TurnReviewResult(
+            self.turn_count,
+            True,
+            True,
+            f"Memory review ready (turn {self.turn_count}).",
+        )
+
+    def get_memory_review(self) -> str:
+        """Return formatted pending suggestion, or a no-pending message."""
+        if self.pending_suggestion is None:
+            return "No pending memory suggestion."
+        limit = self.memory_manager.limits()[self.pending_suggestion.section]
+        return format_suggestion_view(self.pending_suggestion, limit)
+
+    def accept_memory_suggestion(
+        self,
+        content: str | None = None,
+    ) -> tuple[bool, bool]:
+        """Save pending suggestion. Returns (saved, was_compacted)."""
+        if self.pending_suggestion is None:
+            raise ValueError("No pending memory suggestion.")
+
+        section = self.pending_suggestion.section
+        text = content if content is not None else self.pending_suggestion.proposed_content
+        max_chars = self.memory_manager.limits()[section]
+        final_text, was_compacted = merge_and_compact(
+            self.runtime,
+            section,
+            "",
+            text,
+            max_chars,
+        )
+        _, truncated = self.memory_manager.save(section, final_text)
+        self.reload_memory()
+        self.pending_suggestion = None
+        return True, was_compacted or truncated
+
+    def reject_memory_suggestion(self) -> None:
+        """Discard the pending memory suggestion without saving."""
+        self.pending_suggestion = None
 
     def add_user_turn(self, user_input: str) -> list[RetrievedChunk]:
         """Retrieve context, append the user message, and return any sources."""
