@@ -19,9 +19,12 @@ from app.core.commands import format_help_text
 from app.core.compute_backend import UNKNOWN
 from app.core.config import FEATURE_DISPLAY_NAMES, load_config
 from app.rag.retriever import RetrievedChunk, Retriever
+from app.memory.memory_manager import SECTION_KEYS
 from app.tui.widgets import (
     ChatMessage,
     FeatureToggleModal,
+    MemoryEditModal,
+    MemoryViewerModal,
     RagSelectionModal,
     SourcesModal,
     StatusBar,
@@ -369,6 +372,62 @@ class SoulForgeApp(App):
         modal = SourcesModal(chunks)
         self.app.push_screen(modal)
 
+    def _handle_memory_command(self) -> None:
+        self.controller.reload_memory()
+        modal = MemoryViewerModal(self.controller.get_memory_view())
+        self.app.push_screen(modal)
+
+    def _handle_memory_edit_command(self, args: str) -> None:
+        section = args.strip().lower().split(maxsplit=1)[0] if args.strip() else ""
+        if not section:
+            self._write_message(
+                "system",
+                "Usage: /memory-edit <user|memory|session>\n"
+                "  user    — stable user facts\n"
+                "  memory  — durable project memory\n"
+                "  session — short-term session notes",
+            )
+            return
+        if section not in SECTION_KEYS:
+            self._write_message(
+                "system",
+                f"Unknown section '{section}'. Use: user, memory, or session.",
+            )
+            return
+
+        limits = self.controller.memory_manager.limits()
+        initial = self.controller.memory_manager.read_raw(section)
+        modal = MemoryEditModal(section, initial, limits[section])
+        self.app.push_screen(modal, self._handle_memory_edit_result)
+
+    def _handle_memory_edit_result(self, result: tuple[str, str] | None) -> None:
+        if result is None:
+            self._write_message("system", "Memory edit cancelled.")
+            return
+
+        section, text = result
+        try:
+            truncated = self.controller.save_memory(section, text)
+        except ValueError as error:
+            self._write_message("system", str(error))
+            return
+
+        filename = f"{section}.md"
+        message = f"Saved {filename}."
+        if truncated:
+            message += " Content was truncated to fit the character limit."
+        self._write_message("system", message)
+
+    def _handle_memory_on_command(self) -> None:
+        self.controller.enable_memory()
+        self._refresh_features()
+        self._write_message("system", "Memory injection enabled.")
+
+    def _handle_memory_off_command(self) -> None:
+        self.controller.disable_memory()
+        self._refresh_features()
+        self._write_message("system", "Memory injection disabled.")
+
     # --- input handling ------------------------------------------------------
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -416,6 +475,14 @@ class SoulForgeApp(App):
                 return
             self.controller.reload_soul()
             self._write_message("system", "SOUL.md reloaded.")
+        elif command == "/memory":
+            self._handle_memory_command()
+        elif command == "/memory-edit":
+            self._handle_memory_edit_command(args)
+        elif command == "/memory-on":
+            self._handle_memory_on_command()
+        elif command == "/memory-off":
+            self._handle_memory_off_command()
         else:
             self._write_message(
                 "system", f"Unknown command: {command}. Type /help."

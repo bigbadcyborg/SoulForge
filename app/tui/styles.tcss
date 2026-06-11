@@ -168,3 +168,62 @@ SourcesModal {
     width: 100%;
     color: $text-muted;
 }
+
+/* Memory Viewer Modal */
+MemoryViewerModal {
+    align: center middle;
+}
+
+#memory-modal-container {
+    width: 72;
+    height: 24;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#memory-modal-container > Label {
+    margin-bottom: 1;
+    color: $text;
+}
+
+#memory-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+#memory-content {
+    width: 100%;
+    color: $text-muted;
+}
+
+/* Memory Edit Modal */
+MemoryEditModal {
+    align: center middle;
+}
+
+#memory-edit-container {
+    width: 72;
+    height: 26;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#memory-edit-container > Label {
+    margin-bottom: 1;
+    color: $text;
+}
+
+#memory-textarea {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+}
+
+#memory-char-count {
+    margin-bottom: 1;
+    color: $text-muted;
+}

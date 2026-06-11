@@ -5,10 +5,11 @@ from __future__ import annotations
 from rich.text import Text
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Label, Static
+from textual.widgets import Button, Checkbox, Label, Static, TextArea
 
 from app.core.compute_backend import ComputeBackend, UNKNOWN
 from app.core.feature_state import FEATURE_KEYS
+from app.memory.memory_manager import SECTION_FILENAMES
 from app.rag.retriever import RetrievedChunk, Retriever
 
 ROLE_LABELS = {
@@ -248,3 +249,59 @@ class SourcesModal(ModalScreen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close-button":
             self.dismiss()
+
+
+class MemoryViewerModal(ModalScreen):
+    """Modal for viewing user.md, memory.md, and session.md."""
+
+    def __init__(self, content: str) -> None:
+        super().__init__()
+        self.content = content
+
+    def compose(self):
+        with Vertical(id="memory-modal-container"):
+            yield Label("Persistent memory:")
+            with VerticalScroll(id="memory-scroll"):
+                yield Static(self.content, id="memory-content")
+            with Container(id="button-container"):
+                yield Button("Close", id="close-button", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss()
+
+
+class MemoryEditModal(ModalScreen):
+    """Modal for editing a single memory section."""
+
+    def __init__(self, section: str, initial_text: str, max_chars: int) -> None:
+        super().__init__()
+        self.section = section
+        self.initial_text = initial_text
+        self.max_chars = max_chars
+
+    def compose(self):
+        filename = SECTION_FILENAMES[self.section]
+        with Vertical(id="memory-edit-container"):
+            yield Label(f"Edit {filename}:")
+            yield TextArea(self.initial_text, id="memory-textarea")
+            yield Label(self._char_count_label(len(self.initial_text)), id="memory-char-count")
+            with Container(id="button-container"):
+                yield Button("Save", id="save-button", variant="primary")
+                yield Button("Cancel", id="cancel-button")
+
+    def _char_count_label(self, count: int) -> str:
+        return f"Characters: {count} / {self.max_chars}"
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if event.text_area.id != "memory-textarea":
+            return
+        label = self.query_one("#memory-char-count", Label)
+        label.update(self._char_count_label(len(event.text_area.text)))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save-button":
+            text = self.query_one("#memory-textarea", TextArea).text
+            self.dismiss((self.section, text))
+        elif event.button.id == "cancel-button":
+            self.dismiss(None)

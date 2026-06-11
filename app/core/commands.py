@@ -59,6 +59,26 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "/reload-soul",
         "Reload SOUL.md persona into the system prompt",
     ),
+    CommandHelp(
+        "Memory",
+        "/memory",
+        "View user.md, memory.md, and session.md with character counts",
+    ),
+    CommandHelp(
+        "Memory",
+        "/memory-edit [name]",
+        "Edit user, memory, or session (TUI editor; CLI: optional inline content)",
+    ),
+    CommandHelp(
+        "Memory",
+        "/memory-on",
+        "Enable memory injection (equivalent to /features memory on)",
+    ),
+    CommandHelp(
+        "Memory",
+        "/memory-off",
+        "Disable memory injection (equivalent to /features memory off)",
+    ),
 )
 
 

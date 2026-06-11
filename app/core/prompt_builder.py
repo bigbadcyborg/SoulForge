@@ -24,6 +24,26 @@ from app.memory.memory_manager import MemorySnapshot
 # Future iterations can populate baseline operating rules here.
 CORE_SYSTEM_RULES = ""
 
+MEMORY_GROUNDING_RULES = (
+    "IMPORTANT - LOCAL MEMORY (READ-ONLY):\n"
+    "The # User, # Memory, and # Session sections below are the complete contents "
+    "of local memory files (user.md, memory.md, session.md). They are already in "
+    "your context. The person chatting with you IS the user described in user.md. "
+    "When they say 'my', 'I', or 'me', apply facts from user.md to them.\n\n"
+    "You CANNOT write to, update, or save these files. Never claim you saved, "
+    "recorded, added, or updated their profile or memory. If the user shares "
+    "something they want remembered permanently, tell them to run "
+    "/memory-edit user (or memory or session) in the chat.\n\n"
+    "Rules for memory-backed answers:\n"
+    "- If the answer appears in these sections, use ONLY that text. Do not "
+    "supplement with general knowledge, famous people, interviews, or articles.\n"
+    "- Do not invent past conversations, dates, or sources. You have no record "
+    "of earlier chats except what is written in these sections and the current "
+    "conversation above.\n"
+    "- Do not pretend to read, open, or inspect files.\n"
+    "- If these sections do not contain the answer, say it is not in memory yet."
+)
+
 DEFAULT_SYSTEM_PROMPT = "You are a helpful local chatbot."
 
 
@@ -48,28 +68,70 @@ class PromptBuilder:
             sections.append(soul_text.strip())
 
         if features.memory and memory is not None:
+            memory_sections: list[str] = []
             if memory.user.strip():
-                sections.append(f"# User\n{memory.user.strip()}")
+                memory_sections.append(
+                    f"# User (user.md)\n{memory.user.strip()}"
+                )
             if memory.memory.strip():
-                sections.append(f"# Memory\n{memory.memory.strip()}")
+                memory_sections.append(
+                    f"# Memory (memory.md)\n{memory.memory.strip()}"
+                )
             if memory.session.strip():
-                sections.append(f"# Session\n{memory.session.strip()}")
+                memory_sections.append(
+                    f"# Session (session.md)\n{memory.session.strip()}"
+                )
+            if memory_sections:
+                sections.append(MEMORY_GROUNDING_RULES)
+                sections.extend(memory_sections)
 
         if not sections:
             return DEFAULT_SYSTEM_PROMPT
 
         return "\n\n".join(sections)
 
-    def build_user_turn(self, user_input: str, context_text: str = "", use_rag: bool = True) -> str:
-        """Combine retrieved RAG context with the user's question."""
-        if not (use_rag and context_text.strip()):
-            return user_input
+    @staticmethod
+    def _format_active_memory(memory: MemorySnapshot) -> str:
+        """Compact memory block for per-turn user message injection."""
+        parts: list[str] = []
+        if memory.user.strip():
+            parts.append(f"[user.md]\n{memory.user.strip()}")
+        if memory.memory.strip():
+            parts.append(f"[memory.md]\n{memory.memory.strip()}")
+        if memory.session.strip():
+            parts.append(f"[session.md]\n{memory.session.strip()}")
+        return "\n\n".join(parts)
 
-        return (
-            "AVAILABLE CONTEXT FROM DOCUMENTS:\n"
-            f"{context_text}\n\n"
-            "When responding, consider the above context. If it's relevant and helps answer the question, "
-            "incorporate it into your response and mention the source. If the context doesn't contain relevant information, "
-            "answer based on your knowledge and acknowledge the documents didn't cover that topic.\n\n"
-            f"QUESTION:\n{user_input}"
-        )
+    def build_user_turn(
+        self,
+        user_input: str,
+        context_text: str = "",
+        use_rag: bool = True,
+        memory: MemorySnapshot | None = None,
+        use_memory: bool = False,
+    ) -> str:
+        """Combine memory, retrieved RAG context, and the user's question."""
+        sections: list[str] = []
+
+        if use_memory and memory is not None:
+            mem_text = self._format_active_memory(memory)
+            if mem_text:
+                sections.append(
+                    "ACTIVE MEMORY (read-only; authoritative for questions about "
+                    "the user; 'my'/'I'/'me' refer to the user in user.md):\n"
+                    f"{mem_text}\n"
+                    "You cannot save new facts to these files. Never claim you updated "
+                    "memory. To persist new info, tell the user to run /memory-edit."
+                )
+
+        if use_rag and context_text.strip():
+            sections.append(
+                "AVAILABLE CONTEXT FROM DOCUMENTS:\n"
+                f"{context_text}\n\n"
+                "When responding, consider the above context. If it's relevant and helps answer the question, "
+                "incorporate it into your response and mention the source. If the context doesn't contain relevant information, "
+                "answer based on your knowledge and acknowledge the documents didn't cover that topic."
+            )
+
+        sections.append(f"USER MESSAGE:\n{user_input}")
+        return "\n\n".join(sections)

@@ -15,6 +15,7 @@ import argparse
 from app.core.chat_controller import ChatController
 from app.core.commands import format_help_text
 from app.core.config import FEATURE_DISPLAY_NAMES, load_config
+from app.memory.memory_manager import SECTION_FILENAMES, SECTION_KEYS
 from app.rag.retriever import Retriever
 
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit"}
@@ -127,6 +128,52 @@ def _handle_sources_cli(controller: ChatController) -> None:
     print(Retriever.format_sources_detail(controller.last_retrieved_chunks))
 
 
+def _handle_memory_cli(controller: ChatController) -> None:
+    controller.reload_memory()
+    print(controller.get_memory_view())
+
+
+def _handle_memory_edit_cli(controller: ChatController, args: str) -> None:
+    if not args.strip():
+        mem = controller.config.memory
+        print("Memory files:")
+        print(f"  user:    {mem.user_path}")
+        print(f"  memory:  {mem.memory_path}")
+        print(f"  session: {mem.session_path}")
+        print("\nUsage: /memory-edit <user|memory|session> [content]")
+        return
+
+    parts = args.split(maxsplit=1)
+    section = parts[0].lower()
+    if section not in SECTION_KEYS:
+        print(f"Invalid section '{section}'. Use: user, memory, or session.")
+        return
+
+    if len(parts) == 1:
+        mem = controller.config.memory
+        paths = {
+            "user": mem.user_path,
+            "memory": mem.memory_path,
+            "session": mem.session_path,
+        }
+        print(f"Path: {paths[section]}")
+        print()
+        print(controller.memory_manager.read_raw(section))
+        print("\nEdit in an external editor, then run /memory to reload.")
+        return
+
+    try:
+        truncated = controller.save_memory(section, parts[1])
+    except ValueError as error:
+        print(error)
+        return
+
+    filename = SECTION_FILENAMES[section]
+    print(f"Saved {filename}.")
+    if truncated:
+        print("Warning: content was truncated to fit the character limit.")
+
+
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     """Handle CLI commands. Return True if should continue, False if should exit."""
     parts = cmd.split(maxsplit=1)
@@ -153,6 +200,16 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     elif command == "/reload-soul":
         controller.reload_soul()
         print("SOUL.md reloaded.")
+    elif command == "/memory":
+        _handle_memory_cli(controller)
+    elif command == "/memory-edit":
+        _handle_memory_edit_cli(controller, args)
+    elif command == "/memory-on":
+        controller.enable_memory()
+        print("Memory injection enabled.")
+    elif command == "/memory-off":
+        controller.disable_memory()
+        print("Memory injection disabled.")
     else:
         print(f"Unknown command: {command}. Type /help for available commands.")
 

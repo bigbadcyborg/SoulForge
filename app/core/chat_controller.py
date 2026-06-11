@@ -80,6 +80,7 @@ class ChatController:
 
     def load(self) -> None:
         """Load models and assemble the initial system prompt (blocking)."""
+        self.memory_manager.ensure_files()
         self.soul_text = load_soul() if self.features.is_enabled("soul") else ""
         self.memory = (
             self.memory_manager.load() if self.features.is_enabled("memory") else None
@@ -112,8 +113,38 @@ class ChatController:
         """Reload SOUL.md and rebuild the system prompt without restarting."""
         self._rebuild_system_prompt()
 
+    def reload_memory(self) -> None:
+        """Reload memory files and rebuild the system prompt without restarting."""
+        self._rebuild_system_prompt()
+
+    def get_memory_view(self) -> str:
+        """Return formatted memory content with character counts."""
+        self.memory_manager.ensure_files()
+        snapshot = self.memory_manager.load()
+        return self.memory_manager.format_view(
+            snapshot,
+            memory_enabled=self.features.is_enabled("memory"),
+        )
+
+    def save_memory(self, section: str, content: str) -> bool:
+        """Save a memory section and reload the system prompt. Returns True if truncated."""
+        _, truncated = self.memory_manager.save(section, content)
+        self.reload_memory()
+        return truncated
+
+    def enable_memory(self) -> None:
+        """Enable memory injection."""
+        self.set_feature("memory", True)
+
+    def disable_memory(self) -> None:
+        """Disable memory injection."""
+        self.set_feature("memory", False)
+
     def add_user_turn(self, user_input: str) -> list[RetrievedChunk]:
         """Retrieve context, append the user message, and return any sources."""
+        if self.features.is_enabled("memory"):
+            self.reload_memory()
+
         chunks: list[RetrievedChunk] = []
         context_text = ""
         if self.retriever is not None:
@@ -126,6 +157,8 @@ class ChatController:
             user_input,
             context_text,
             use_rag=self.features.is_enabled("rag"),
+            memory=self.memory,
+            use_memory=self.features.is_enabled("memory"),
         )
         self.messages.append({"role": "user", "content": user_turn})
         self.last_retrieved_chunks = chunks
