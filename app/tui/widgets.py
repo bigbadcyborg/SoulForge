@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
 from rich.text import Text
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Label, Static, TextArea
+from textual.widgets import Button, Checkbox, Label, Static, TextArea, Input
 
 from app.core.compute_backend import ComputeBackend, UNKNOWN
 from app.core.feature_state import FEATURE_KEYS
@@ -340,3 +342,88 @@ class MemoryReviewModal(ModalScreen):
             self.dismiss("edit")
         elif event.button.id == "reject-button":
             self.dismiss("reject")
+
+
+class SkillViewerModal(ModalScreen):
+    """Modal for listing and viewing skills."""
+
+    def __init__(self, skills: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self.skills = skills
+
+    def compose(self):
+        with Vertical(id="skill-viewer-container"):
+            yield Label("Active Skills:")
+            with VerticalScroll(id="skill-list-scroll"):
+                if not self.skills:
+                    yield Label("(no active skills)", classes="dim")
+                for skill in self.skills:
+                    name = skill.get("name", "unnamed")
+                    desc = skill.get("description", "")
+                    yield Button(f"{name}: {desc}", id=f"skill_btn_{name}", classes="skill-list-item")
+            with Container(id="button-container"):
+                yield Button("New Skill", id="new-skill-button", variant="success")
+                yield Button("Close", id="close-button", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss(None)
+        elif event.button.id == "new-skill-button":
+            self.dismiss("new")
+        elif event.button.id and event.button.id.startswith("skill_btn_"):
+            skill_name = event.button.id.replace("skill_btn_", "")
+            self.dismiss(("view", skill_name))
+
+
+class SkillDetailModal(ModalScreen):
+    """Modal for viewing skill markdown content."""
+
+    def __init__(self, name: str, content: str) -> None:
+        super().__init__()
+        self.skill_name = name
+        self.content = content
+
+    def compose(self):
+        with Vertical(id="skill-detail-container"):
+            yield Label(f"Skill: {self.skill_name}")
+            with VerticalScroll(id="skill-content-scroll"):
+                yield Static(self.content, id="skill-content")
+            with Container(id="button-container"):
+                yield Button("Archive", id="archive-button", variant="error")
+                yield Button("Close", id="close-button", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss(None)
+        elif event.button.id == "archive-button":
+            self.dismiss(("archive", self.skill_name))
+
+
+class SkillCreateModal(ModalScreen):
+    """Modal for creating a new skill manually."""
+
+    def compose(self):
+        with Vertical(id="skill-create-container"):
+            yield Label("Create New Skill")
+            yield Label("Name:")
+            yield Input(placeholder="skill_name", id="skill-name-input")
+            yield Label("Description:")
+            yield Input(placeholder="What this skill does", id="skill-desc-input")
+            yield Label("Procedure / Content (Markdown):")
+            yield TextArea(id="skill-content-textarea")
+            with Container(id="button-container"):
+                yield Button("Create", id="create-button", variant="success")
+                yield Button("Cancel", id="cancel-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-button":
+            self.dismiss(None)
+        elif event.button.id == "create-button":
+            name = self.query_one("#skill-name-input", Input).value.strip()
+            desc = self.query_one("#skill-desc-input", Input).value.strip()
+            content = self.query_one("#skill-content-textarea", TextArea).text.strip()
+            if name and content:
+                self.dismiss({"name": name, "description": desc, "content": content})
+            else:
+                # Basic validation: could use a tooltip or status label here
+                pass

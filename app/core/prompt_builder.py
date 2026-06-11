@@ -57,6 +57,7 @@ class PromptBuilder:
         self,
         soul_text: str = "",
         memory: MemorySnapshot | None = None,
+        skills: list[str] | None = None,
     ) -> str:
         features = self.config.features
         sections: list[str] = []
@@ -84,6 +85,10 @@ class PromptBuilder:
             if memory_sections:
                 sections.append(MEMORY_GROUNDING_RULES)
                 sections.extend(memory_sections)
+
+        if features.skills and skills:
+            sections.append("# Relevant Skills")
+            sections.extend(skills)
 
         if not sections:
             return DEFAULT_SYSTEM_PROMPT

@@ -24,6 +24,7 @@ from app.memory.memory_reviewer import (
 )
 from app.rag.ingest import IngestResult, ingest_documents
 from app.rag.retriever import Retriever, RetrievedChunk, get_store_stats
+from app.skills.skill_manager import SkillManager
 
 SOUL_PATH = PROJECT_ROOT / "SOUL.md"
 
@@ -51,6 +52,7 @@ class ChatController:
         self.runtime = ModelRuntime(config)
         self.prompt_builder = PromptBuilder(config)
         self.memory_manager = MemoryManager(config)
+        self.skill_manager = SkillManager(config)
         self.features = FeatureStateManager(config, on_change=self._on_feature_change)
 
         self.turn_count: int = 0
@@ -67,7 +69,7 @@ class ChatController:
         self.loaded: bool = False
 
     def _on_feature_change(self, key: str, enabled: bool) -> None:
-        if key in ("soul", "memory"):
+        if key in ("soul", "memory", "skills"):
             self._rebuild_system_prompt()
         elif key == "rag" and enabled and self.selected_sources is None:
             self.selected_sources = self.get_available_sources()
@@ -113,7 +115,17 @@ class ChatController:
         self.loaded = True
 
     def _build_system_prompt(self) -> str:
-        return self.prompt_builder.build_system_prompt(self.soul_text, self.memory)
+        skills: list[str] = []
+        if self.features.is_enabled("skills"):
+            # v1: Load all active skills for keyword matching or manual use.
+            # In a later iteration, this will be more selective.
+            active_skills = self.skill_manager.list_skills(status="active")
+            for meta in active_skills:
+                content = self.skill_manager.get_skill_content(meta["name"])
+                if content:
+                    skills.append(content)
+
+        return self.prompt_builder.build_system_prompt(self.soul_text, self.memory, skills)
 
     def _rebuild_system_prompt(self) -> None:
         """Reload soul/memory content and refresh the system message."""

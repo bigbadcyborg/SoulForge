@@ -29,6 +29,9 @@ from app.tui.widgets import (
     RagSelectionModal,
     SourcesModal,
     StatusBar,
+    SkillViewerModal,
+    SkillDetailModal,
+    SkillCreateModal,
 )
 
 
@@ -500,6 +503,40 @@ class SoulForgeApp(App):
             return
         self._accept_pending_memory_suggestion()
 
+    def _handle_skills_command(self) -> None:
+        active_skills = self.controller.skill_manager.list_skills(status="active")
+        modal = SkillViewerModal(active_skills)
+        self.app.push_screen(modal, self._handle_skills_modal_result)
+
+    def _handle_skills_modal_result(self, result: Any) -> None:
+        if result == "new":
+            self.app.push_screen(SkillCreateModal(), self._handle_skill_create_result)
+        elif isinstance(result, tuple) and result[0] == "view":
+            skill_name = result[1]
+            content = self.controller.skill_manager.get_skill_content(skill_name)
+            if content:
+                modal = SkillDetailModal(skill_name, content)
+                self.app.push_screen(modal, self._handle_skills_modal_result)
+        elif isinstance(result, tuple) and result[0] == "archive":
+            skill_name = result[1]
+            if self.controller.skill_manager.archive_skill(skill_name):
+                self._write_message("system", f"Skill '{skill_name}' archived.")
+                if self.controller.features.is_enabled("skills"):
+                    self.controller.reload_soul() # Rebuilds prompt
+            else:
+                self._write_message("system", f"Failed to archive skill '{skill_name}'.")
+
+    def _handle_skill_create_result(self, result: dict[str, str] | None) -> None:
+        if result:
+            if self.controller.skill_manager.create_skill(
+                result["name"], result["description"], result["content"]
+            ):
+                self._write_message("system", f"Skill '{result['name']}' created.")
+                if self.controller.features.is_enabled("skills"):
+                    self.controller.reload_soul()
+            else:
+                self._write_message("system", f"Failed to create skill '{result['name']}' (it may already exist).")
+
     def _handle_memory_reject_command(self) -> None:
         if self.controller.pending_suggestion is None:
             self._write_message("system", "No pending memory suggestion.")
@@ -568,6 +605,8 @@ class SoulForgeApp(App):
             self._handle_memory_accept_command()
         elif command == "/memory-reject":
             self._handle_memory_reject_command()
+        elif command == "/skills":
+            self._handle_skills_command()
         else:
             self._write_message(
                 "system", f"Unknown command: {command}. Type /help."
