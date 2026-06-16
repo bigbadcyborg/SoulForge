@@ -19,7 +19,7 @@ features:
   rag: false
   memory: true
   skills: true
-  curator: false
+  curator: true
   kanban: false
   streaming: true
   showSources: true
@@ -74,3 +74,5 @@ tools:
   maxReadBytes: 65536
   shellAllowlist: []
   autoApproveReadOnly: true
+onboarding:
+  completed: true
