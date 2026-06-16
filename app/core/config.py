@@ -221,6 +221,11 @@ class ToolsConfig:
 
 
 @dataclass
+class OnboardingConfig:
+    completed: bool = False
+
+
+@dataclass
 class AppConfig:
     model: ModelConfig
     generation: GenerationConfig
@@ -233,6 +238,7 @@ class AppConfig:
     sessions: SessionsConfig
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    onboarding: OnboardingConfig = field(default_factory=OnboardingConfig)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -364,6 +370,11 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         auto_approve_read_only=tools_section.get("autoApproveReadOnly", True),
     )
 
+    onboarding_section = _section(data, "onboarding")
+    onboarding = OnboardingConfig(
+        completed=onboarding_section.get("completed", False),
+    )
+
     return AppConfig(
         model=model,
         generation=generation,
@@ -376,6 +387,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         sessions=sessions,
         logging=logging_cfg,
         tools=tools_cfg,
+        onboarding=onboarding,
         raw=data,
     )
 
@@ -449,6 +461,45 @@ def save_features(
         data = dict(config.raw) if config.raw else {}
 
     data["features"] = features_to_yaml_dict(config.features)
+    config.raw = data
+
+    directory = config_path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+
+    fd, temp_path = tempfile.mkstemp(
+        dir=directory,
+        prefix=".config-",
+        suffix=".yaml.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(data, handle, default_flow_style=False, sort_keys=False)
+        os.replace(temp_path, config_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
+
+
+def onboarding_to_yaml_dict(onboarding: OnboardingConfig) -> dict[str, bool]:
+    """Convert an OnboardingConfig to the dict written under ``onboarding:``."""
+    return {"completed": onboarding.completed}
+
+
+def save_onboarding(
+    config: AppConfig,
+    path: str | Path | None = None,
+) -> None:
+    """Persist the current onboarding state to ``config.yaml`` (atomic write)."""
+    config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    else:
+        data = dict(config.raw) if config.raw else {}
+
+    data["onboarding"] = onboarding_to_yaml_dict(config.onboarding)
     config.raw = data
 
     directory = config_path.parent

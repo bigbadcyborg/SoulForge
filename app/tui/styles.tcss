@@ -3,6 +3,16 @@ Screen {
     background: $surface;
 }
 
+#app-body {
+    height: 1fr;
+    layout: horizontal;
+}
+
+#chat-column {
+    width: 1fr;
+    height: 100%;
+}
+
 #chat-view {
     height: 1fr;
     padding: 1 2;
@@ -610,4 +620,105 @@ ToolsMenuModal, ToolTestModal, AddShellCommandModal {
 #tool-test-args {
     height: 4;
     margin-bottom: 1;
+}
+
+TutorialWizardPanel {
+    display: none;
+    width: 56;
+    height: 100%;
+    background: $surface;
+    border-left: solid $primary;
+    padding: 1;
+    layout: vertical;
+}
+
+TutorialWizardPanel.-visible {
+    display: block;
+}
+
+#tutorial-hint {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#tutorial-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#tutorial-progress {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#tutorial-body-scroll {
+    height: 1fr;
+    min-height: 6;
+    border: solid $panel;
+    padding: 0 1;
+    margin-bottom: 1;
+    scrollbar-size-vertical: 1;
+}
+
+#tutorial-body {
+    width: 100%;
+}
+
+#tutorial-checklist {
+    height: auto;
+    width: 100%;
+    margin-bottom: 1;
+    padding: 0 1;
+    border: solid $panel;
+}
+
+#tutorial-checklist-empty {
+    margin-top: 0;
+    color: $text-muted;
+}
+
+.tutorial-check-row {
+    width: 100%;
+    height: auto;
+    margin: 0 0 1 0;
+    align: left top;
+}
+
+.tutorial-check-mark {
+    width: 2;
+    height: 1;
+    margin: 0 1 0 0;
+    content-align: center middle;
+}
+
+.tutorial-check-mark.-checked {
+    color: $success;
+}
+
+.tutorial-check-label {
+    width: 1fr;
+    height: auto;
+}
+
+#tutorial-button-stack {
+    width: 100%;
+    height: auto;
+    min-height: 7;
+}
+
+.tutorial-button-row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    align: center middle;
+    margin-top: 1;
+}
+
+.tutorial-button-row Button {
+    width: 1fr;
+    margin: 0 1 0 0;
+}
+
+.tutorial-button-row Button:last-child {
+    margin-right: 0;
 }

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterator
 
 from app.core.compute_backend import ComputeBackend
-from app.core.config import PROJECT_ROOT, AppConfig, save_tools
+from app.core.config import PROJECT_ROOT, AppConfig, save_onboarding, save_tools
 from app.core.diagnostics import (
     format_config_view,
     format_diagnostics_view,
@@ -288,6 +288,13 @@ class ChatController:
         _, truncated = self.memory_manager.save(section, content)
         self.reload_memory()
         return truncated
+
+    def clear_all_memory(self) -> None:
+        """Wipe user.md, memory.md, and session.md, then rebuild prompt memory."""
+        for section in ("user", "memory", "session"):
+            self.memory_manager.save(section, "")
+        self.pending_suggestion = None
+        self.reload_memory()
 
     def enable_memory(self) -> None:
         """Enable memory injection."""
@@ -1481,6 +1488,10 @@ class ChatController:
         allowlist.remove(command)
         save_tools(self.config)
         return f"Removed from shellAllowlist: {command}"
+
+    def save_onboarding_config(self) -> None:
+        """Persist onboarding completion state to config.yaml."""
+        save_onboarding(self.config)
 
     def format_tool_call_preview(self, pending: PendingToolCall) -> str:
         import json

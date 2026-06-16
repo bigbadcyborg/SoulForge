@@ -39,6 +39,11 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "Resolved configuration paths, features, and limits (read-only)",
     ),
     CommandHelp(
+        "General",
+        "/tutorial",
+        "Open the onboarding tutorial wizard (TUI)",
+    ),
+    CommandHelp(
         "Tools",
         "/tools",
         "Open tools workshop (TUI) or list status (CLI)",
@@ -136,6 +141,11 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "Memory",
         "/memory-off",
         "Disable memory injection (equivalent to /features memory off)",
+    ),
+    CommandHelp(
+        "Memory",
+        "/memory-clear",
+        "Wipe user.md, memory.md, and session.md",
     ),
     CommandHelp(
         "Memory",

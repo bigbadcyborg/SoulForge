@@ -8,6 +8,7 @@ environments (tests, tooling) without the native dependency.
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Any, Iterator
 
 from app.core.compute_backend import UNKNOWN, ComputeBackend, detect_compute_backend
@@ -25,6 +26,7 @@ class ModelRuntime:
         self._chat: "Llama | None" = None
         self._embedder: "Llama | None" = None
         self._compute_backend: ComputeBackend = UNKNOWN
+        self._lock = threading.RLock()
 
     @property
     def compute_backend(self) -> ComputeBackend:
@@ -32,6 +34,34 @@ class ModelRuntime:
 
     def load_chat_model(self) -> "Llama":
         """Load the GGUF chat model, raising a clear error if it is missing."""
+        with self._lock:
+            return self._load_chat_model_unlocked()
+
+    def load_embedding_model(self) -> "Llama":
+        """Load the GGUF embedding model, raising a clear error if missing."""
+        with self._lock:
+            return self._load_embedding_model_unlocked()
+
+    def embed(self, text: str) -> list[float]:
+        """Return the embedding vector for a piece of text."""
+        with self._lock:
+            embedder = self._load_embedding_model_unlocked()
+            result = embedder.create_embedding(text)
+            return result["data"][0]["embedding"]
+
+    def _completion_params(self, **overrides: Any) -> dict[str, Any]:
+        gen = self.config.generation
+        params: dict[str, Any] = {
+            "temperature": gen.temperature,
+            "top_p": gen.top_p,
+            "repeat_penalty": gen.repeat_penalty,
+            "max_tokens": gen.max_tokens,
+            "stop": gen.stop,
+        }
+        params.update(overrides)
+        return params
+
+    def _load_chat_model_unlocked(self) -> "Llama":
         if self._chat is not None:
             return self._chat
 
@@ -56,8 +86,7 @@ class ModelRuntime:
         self._compute_backend = detect_compute_backend(self.config)
         return self._chat
 
-    def load_embedding_model(self) -> "Llama":
-        """Load the GGUF embedding model, raising a clear error if missing."""
+    def _load_embedding_model_unlocked(self) -> "Llama":
         if self._embedder is not None:
             return self._embedder
 
@@ -81,12 +110,6 @@ class ModelRuntime:
         )
         return self._embedder
 
-    def embed(self, text: str) -> list[float]:
-        """Return the embedding vector for a piece of text."""
-        embedder = self.load_embedding_model()
-        result = embedder.create_embedding(text)
-        return result["data"][0]["embedding"]
-
     def create_chat_completion(
         self,
         messages: list[dict[str, str]],
@@ -99,23 +122,32 @@ class ModelRuntime:
         Returns the raw llama_cpp response, or a streaming iterator when
         ``stream`` is True.
         """
-        chat = self.load_chat_model()
-        gen = self.config.generation
+        if stream:
+            return self._stream_chat_completion(messages, **overrides)
 
-        params: dict[str, Any] = {
-            "temperature": gen.temperature,
-            "top_p": gen.top_p,
-            "repeat_penalty": gen.repeat_penalty,
-            "max_tokens": gen.max_tokens,
-            "stop": gen.stop,
-        }
-        params.update(overrides)
+        with self._lock:
+            chat = self._load_chat_model_unlocked()
+            return chat.create_chat_completion(
+                messages=messages,
+                stream=False,
+                **self._completion_params(**overrides),
+            )
 
-        return chat.create_chat_completion(
-            messages=messages,
-            stream=stream,
-            **params,
-        )
+    def _stream_chat_completion(
+        self,
+        messages: list[dict[str, str]],
+        **overrides: Any,
+    ) -> Iterator[dict[str, Any]]:
+        """Stream tokens while holding the runtime lock for the full decode."""
+        with self._lock:
+            chat = self._load_chat_model_unlocked()
+            stream = chat.create_chat_completion(
+                messages=messages,
+                stream=True,
+                **self._completion_params(**overrides),
+            )
+            for chunk in stream:
+                yield chunk
 
     @staticmethod
     def iter_stream_text(stream: Iterator[dict[str, Any]]) -> Iterator[str]:

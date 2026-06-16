@@ -12,7 +12,7 @@ from pathlib import Path
 from app.utils.guards import format_startup_error
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Input
 
 from app.core.chat_controller import ChatController
@@ -49,6 +49,8 @@ from app.tui.widgets import (
     SessionBrowserModal,
     SessionDetailModal,
     SessionSaveModal,
+    TutorialFinished,
+    TutorialWizardPanel,
 )
 
 
@@ -73,8 +75,11 @@ class SoulForgeApp(App):
         self.models_ready = False
 
     def compose(self) -> ComposeResult:
-        yield VerticalScroll(id="chat-view")
-        yield Input(placeholder="Loading model...", id="prompt", disabled=True)
+        with Horizontal(id="app-body"):
+            with Vertical(id="chat-column"):
+                yield VerticalScroll(id="chat-view")
+                yield Input(placeholder="Loading model...", id="prompt", disabled=True)
+            yield TutorialWizardPanel()
         yield StatusBar()
 
     @property
@@ -113,7 +118,7 @@ class SoulForgeApp(App):
 
     # --- workers -------------------------------------------------------------
 
-    @work(thread=True, exclusive=True, group="load")
+    @work(thread=True, exclusive=True, group="model")
     def _load_models(self) -> None:
         try:
             self.controller.load()
@@ -124,7 +129,7 @@ class SoulForgeApp(App):
             return
         self.call_from_thread(self._on_models_loaded)
 
-    @work(thread=True, exclusive=True, group="generation")
+    @work(thread=True, exclusive=True, group="model")
     def _generate(self, user_input: str) -> None:
         try:
             chunks = self.controller.add_user_turn(user_input)
@@ -168,7 +173,7 @@ class SoulForgeApp(App):
         finally:
             self.call_from_thread(self._generation_done)
 
-    @work(thread=True, exclusive=True, group="ingest")
+    @work(thread=True, exclusive=True, group="model")
     def _run_ingest(self) -> None:
         def on_progress(name: str, method: str, current: int, total: int) -> None:
             self.call_from_thread(
@@ -203,6 +208,27 @@ class SoulForgeApp(App):
         self.prompt.placeholder = "Type a message, or /help"
         self.prompt.focus()
         self._write_message("system", "Model loaded. Ready to chat.")
+        if not self.controller.config.onboarding.completed:
+            self._open_tutorial_wizard()
+
+    def _open_tutorial_wizard(self) -> None:
+        panel = self.query_one(TutorialWizardPanel)
+        panel.show_panel()
+        self.prompt.focus()
+
+    def on_tutorial_finished(self, event: TutorialFinished) -> None:
+        self._on_tutorial_done(event.result)
+
+    def _on_tutorial_done(self, result: str | None) -> None:
+        if result != "completed":
+            return
+        if not self.controller.config.onboarding.completed:
+            self.controller.config.onboarding.completed = True
+            self.controller.save_onboarding_config()
+            self._write_message(
+                "system",
+                "Tutorial completed. You can re-open it anytime with /tutorial.",
+            )
 
     def _on_load_failed(self, error: str) -> None:
         self.status_bar.set_state("Load failed")
@@ -373,14 +399,17 @@ class SoulForgeApp(App):
                 self._write_message(role, text)
 
     def _status_text(self) -> str:
-        stats = self.controller.get_rag_stats()
-
         rag_info = ""
-        if stats.get("chunk_count", 0) or stats.get("sources"):
-            rag_info = (
-                f"\nRAG index: {stats.get('chunk_count', 0)} chunk(s), "
-                f"{len(stats.get('sources', []))} source(s)"
-            )
+        if self.models_ready:
+            try:
+                stats = self.controller.get_rag_stats()
+                if stats.get("chunk_count", 0) or stats.get("sources"):
+                    rag_info = (
+                        f"\nRAG index: {stats.get('chunk_count', 0)} chunk(s), "
+                        f"{len(stats.get('sources', []))} source(s)"
+                    )
+            except Exception:  # noqa: BLE001 - status must never crash the TUI
+                rag_info = "\nRAG index: unavailable"
 
         return (
             f"Model: {self.controller.model_name}\n"
@@ -610,6 +639,13 @@ class SoulForgeApp(App):
         self.controller.disable_memory()
         self._refresh_features()
         self._write_message("system", "Memory injection disabled.")
+
+    def _handle_memory_clear_command(self) -> None:
+        self.controller.clear_all_memory()
+        self._write_message(
+            "system",
+            "Cleared user.md, memory.md, and session.md.",
+        )
 
     def _open_memory_review_modal(self) -> None:
         suggestion = self.controller.pending_suggestion
@@ -1187,6 +1223,8 @@ class SoulForgeApp(App):
             self._handle_memory_on_command()
         elif command == "/memory-off":
             self._handle_memory_off_command()
+        elif command == "/memory-clear":
+            self._handle_memory_clear_command()
         elif command == "/memory-review":
             self._handle_memory_review_command()
         elif command == "/memory-accept":
@@ -1245,6 +1283,8 @@ class SoulForgeApp(App):
             self._handle_tool_approve_command(args)
         elif command == "/tool-reject":
             self._handle_tool_reject_command(args)
+        elif command == "/tutorial":
+            self._open_tutorial_wizard()
         else:
             self._write_message(
                 "system", f"Unknown command: {command}. Type /help."

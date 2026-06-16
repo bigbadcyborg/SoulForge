@@ -84,3 +84,6 @@ tools:
   maxReadBytes: 65536
   shellAllowlist: []
   autoApproveReadOnly: true
+
+onboarding:
+  completed: false

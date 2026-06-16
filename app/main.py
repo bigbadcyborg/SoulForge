@@ -297,6 +297,11 @@ def _handle_memory_reject_cli(controller: ChatController) -> None:
     print("Memory suggestion rejected.")
 
 
+def _handle_memory_clear_cli(controller: ChatController) -> None:
+    controller.clear_all_memory()
+    print("Cleared user.md, memory.md, and session.md.")
+
+
 def _handle_success_cli(controller: ChatController, args: str) -> None:
     result = controller.mark_workflow_success(args.strip())
     if result.message:
@@ -546,6 +551,9 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         print(controller.run_diagnostics())
     elif command == "/config":
         print(controller.get_config_view())
+    elif command == "/tutorial":
+        print("The tutorial wizard is available in TUI mode.")
+        print("Run: python -m app.main")
     elif command == "/features":
         _handle_features_cli(controller, args)
     elif command == "/ingest":
@@ -567,6 +575,8 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     elif command == "/memory-off":
         controller.disable_memory()
         print("Memory injection disabled.")
+    elif command == "/memory-clear":
+        _handle_memory_clear_cli(controller)
     elif command == "/memory-review":
         _handle_memory_review_cli(controller)
     elif command == "/memory-accept":

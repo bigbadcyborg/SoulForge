@@ -6,6 +6,7 @@ import json
 from typing import Any
 from rich.text import Text
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Label, Static, TextArea, Input
 
@@ -19,6 +20,7 @@ from app.tasks.task_manager import COLUMN_LABELS, COLUMNS, Task
 from app.tasks.task_suggester import TaskSuggestion, format_suggestion_view
 from app.sessions.session_manager import SessionMeta
 from app.rag.retriever import RetrievedChunk, Retriever
+from app.tutorial.content import TUTORIAL_STEPS
 from app.tools.models import PendingToolCall
 
 ROLE_LABELS = {
@@ -1031,4 +1033,136 @@ class SessionSaveModal(ModalScreen):
         elif event.button.id == "save-button":
             title = self.query_one("#session-title-input", Input).value.strip()
             self.dismiss(title or self.default_title)
+
+
+class TutorialFinished(Message):
+    """Posted when the user finishes or skips the tutorial panel."""
+
+    def __init__(self, result: str) -> None:
+        self.result = result
+        super().__init__()
+
+
+class TutorialWizardPanel(Vertical):
+    """Side-panel onboarding wizard; chat input stays usable alongside."""
+
+    def __init__(self) -> None:
+        super().__init__(id="tutorial-panel")
+        self.step_index = 0
+        self._checks: dict[str, bool] = {}
+
+    def compose(self):
+        yield Label("Tutorial — try commands in the chat as you go", id="tutorial-hint")
+        yield Label("", id="tutorial-title")
+        yield Label("", id="tutorial-progress")
+        with VerticalScroll(id="tutorial-body-scroll"):
+            yield Static("", id="tutorial-body")
+        with Vertical(id="tutorial-checklist"):
+            pass
+        with Vertical(id="tutorial-button-stack"):
+            with Container(classes="tutorial-button-row"):
+                yield Button("Previous", id="tutorial-prev")
+                yield Button("Next", id="tutorial-next", variant="primary")
+            with Container(classes="tutorial-button-row"):
+                yield Button("Skip", id="tutorial-skip")
+                yield Button("Finish", id="tutorial-finish", variant="success")
+
+    def show_panel(self) -> None:
+        """Reveal the panel and refresh the current step."""
+        self.add_class("-visible")
+        self._refresh()
+
+    def hide_panel(self) -> None:
+        """Hide the panel without posting a completion message."""
+        self.remove_class("-visible")
+
+    def _complete(self) -> None:
+        self.hide_panel()
+        self.post_message(TutorialFinished("completed"))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id or ""
+        if button_id == "tutorial-prev" and self.step_index > 0:
+            self.step_index -= 1
+            self._refresh()
+        elif button_id == "tutorial-next" and self.step_index < len(TUTORIAL_STEPS) - 1:
+            self.step_index += 1
+            self._refresh()
+        elif button_id == "tutorial-skip":
+            self._complete()
+        elif button_id == "tutorial-finish":
+            self._complete()
+
+    def _check_mark(self, checked: bool) -> Text:
+        mark = Text()
+        if checked:
+            mark.append("✓", style="bold bright_green")
+        else:
+            mark.append("○", style="dim")
+        return mark
+
+    def on_click(self, event) -> None:
+        row = event.widget
+        while row is not None and not row.has_class("tutorial-check-row"):
+            row = row.parent
+        if row is None or not row.id or not row.id.startswith("tutorial-check-"):
+            return
+        item_id = row.id.removeprefix("tutorial-check-")
+        new_value = not self._checks.get(item_id, False)
+        self._checks[item_id] = new_value
+        mark = row.query_one(".tutorial-check-mark", Static)
+        mark.update(self._check_mark(new_value))
+        mark.set_class(new_value, "-checked")
+        self._refresh_progress()
+
+    def _refresh(self) -> None:
+        step = TUTORIAL_STEPS[self.step_index]
+        self.query_one("#tutorial-title", Label).update(step.title)
+        self.query_one("#tutorial-body", Static).update(step.body)
+        self._refresh_progress()
+        self._refresh_checklist()
+        self._refresh_nav_buttons()
+
+    def _refresh_progress(self) -> None:
+        total_checks = 0
+        checked = 0
+        for tutorial_step in TUTORIAL_STEPS:
+            for item in tutorial_step.checklist:
+                total_checks += 1
+                if self._checks.get(item.id, False):
+                    checked += 1
+        progress = f"Step {self.step_index + 1}/{len(TUTORIAL_STEPS)}"
+        if total_checks:
+            progress += f"  •  Quest checks {checked}/{total_checks}"
+        self.query_one("#tutorial-progress", Static).update(progress)
+
+    def _refresh_checklist(self) -> None:
+        step = TUTORIAL_STEPS[self.step_index]
+        container = self.query_one("#tutorial-checklist", Vertical)
+        for child in list(container.children):
+            child.remove()
+        if not step.checklist:
+            container.mount(Static(""))
+            return
+        container.mount(Static("Quest checklist:"))
+        for item in step.checklist:
+            value = self._checks.get(item.id, False)
+            row = Horizontal(
+                classes="tutorial-check-row",
+                id=f"tutorial-check-{item.id}",
+            )
+            container.mount(row)
+            mark = Static(self._check_mark(value), classes="tutorial-check-mark")
+            if value:
+                mark.add_class("-checked")
+            row.mount(mark)
+            row.mount(Static(item.label, classes="tutorial-check-label"))
+
+    def _refresh_nav_buttons(self) -> None:
+        prev_btn = self.query_one("#tutorial-prev", Button)
+        next_btn = self.query_one("#tutorial-next", Button)
+        finish_btn = self.query_one("#tutorial-finish", Button)
+        prev_btn.disabled = self.step_index == 0
+        next_btn.disabled = self.step_index >= len(TUTORIAL_STEPS) - 1
+        finish_btn.disabled = self.step_index < len(TUTORIAL_STEPS) - 1
 
