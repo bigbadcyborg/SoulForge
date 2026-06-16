@@ -49,5 +49,8 @@ skills:
   autoCreate: false
   minSuccessfulRepeats: 3
   successWindowTurns: 3
+curator:
+  staleDays: 30
+  bloatMaxChars: 1000
 tasks:
   kanbanPath: ./app/tasks/kanban.json

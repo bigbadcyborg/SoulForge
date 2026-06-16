@@ -33,12 +33,18 @@ def test_skill_manager_basic(tmp_path):
     mgr.archive_skill("test_skill")
     assert not (tmp_path / "active" / "test_skill.md").exists()
     assert (tmp_path / "archived" / "test_skill.md").exists()
-    
+
     skills = mgr.list_skills(status="active")
     assert len(skills) == 0
     archived = mgr.list_skills(status="archived")
     assert len(archived) == 1
-    
+
+    assert mgr.restore_skill("test_skill") is True
+    assert (tmp_path / "active" / "test_skill.md").exists()
+    assert not (tmp_path / "archived" / "test_skill.md").exists()
+    assert len(mgr.list_skills(status="active")) == 1
+    assert len(mgr.list_skills(status="archived")) == 0
+
     # Delete skill
     mgr.delete_skill("test_skill")
     assert not (tmp_path / "archived" / "test_skill.md").exists()

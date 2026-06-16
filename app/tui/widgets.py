@@ -14,6 +14,7 @@ from app.core.feature_state import FEATURE_KEYS
 from app.memory.memory_manager import SECTION_FILENAMES
 from app.memory.memory_reviewer import MemorySuggestion
 from app.skills.skill_crystallizer import SkillSuggestion
+from app.skills.curator import CuratorFinding, format_finding_view
 from app.rag.retriever import RetrievedChunk, Retriever
 
 ROLE_LABELS = {
@@ -406,16 +407,52 @@ class SkillCrystallizeEditModal(ModalScreen):
             self.dismiss(text.strip())
 
 
+class CuratorReviewModal(ModalScreen):
+    """Modal for reviewing and approving curator findings one at a time."""
+
+    def __init__(
+        self,
+        finding: CuratorFinding,
+        index: int,
+        total: int,
+    ) -> None:
+        super().__init__()
+        self.finding = finding
+        self.index = index
+        self.total = total
+
+    def compose(self):
+        preview = format_finding_view(self.finding, self.index, self.total)
+        with Vertical(id="curator-review-container"):
+            yield Label(f"Curator review ({self.index + 1}/{self.total}):")
+            with VerticalScroll(id="curator-review-scroll"):
+                yield Static(preview, id="curator-review-content")
+            with Container(id="button-container"):
+                yield Button("Approve", id="approve-button", variant="primary")
+                yield Button("Ignore", id="ignore-button")
+                yield Button("Close", id="close-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss(None)
+        elif event.button.id == "approve-button":
+            self.dismiss(("approve", self.finding.finding_id))
+        elif event.button.id == "ignore-button":
+            self.dismiss(("ignore", self.finding.finding_id))
+
+
 class SkillViewerModal(ModalScreen):
     """Modal for listing and viewing skills."""
 
     def __init__(
         self,
         skills: list[dict[str, Any]],
+        archived_skills: list[dict[str, Any]] | None = None,
         pending_message: str = "",
     ) -> None:
         super().__init__()
         self.skills = skills
+        self.archived_skills = archived_skills or []
         self.pending_message = pending_message
 
     def compose(self):
@@ -429,7 +466,21 @@ class SkillViewerModal(ModalScreen):
                 for skill in self.skills:
                     name = skill.get("name", "unnamed")
                     desc = skill.get("description", "")
-                    yield Button(f"{name}: {desc}", id=f"skill_btn_{name}", classes="skill-list-item")
+                    yield Button(
+                        f"{name}: {desc}",
+                        id=f"skill_btn_{name}",
+                        classes="skill-list-item",
+                    )
+            if self.archived_skills:
+                yield Label("Archived Skills:")
+                for skill in self.archived_skills:
+                    name = skill.get("name", "unnamed")
+                    desc = skill.get("description", "")
+                    yield Button(
+                        f"{name}: {desc} (archived)",
+                        id=f"skill_btn_{name}",
+                        classes="skill-list-item dim",
+                    )
             with Container(id="button-container"):
                 yield Button("New Skill", id="new-skill-button", variant="success")
                 yield Button("Close", id="close-button", variant="primary")
@@ -447,18 +498,25 @@ class SkillViewerModal(ModalScreen):
 class SkillDetailModal(ModalScreen):
     """Modal for viewing skill markdown content."""
 
-    def __init__(self, name: str, content: str) -> None:
+    def __init__(self, name: str, content: str, archived: bool = False) -> None:
         super().__init__()
         self.skill_name = name
         self.content = content
+        self.archived = archived
 
     def compose(self):
+        label = f"Skill: {self.skill_name}"
+        if self.archived:
+            label += " (archived)"
         with Vertical(id="skill-detail-container"):
-            yield Label(f"Skill: {self.skill_name}")
+            yield Label(label)
             with VerticalScroll(id="skill-content-scroll"):
                 yield Static(self.content, id="skill-content")
             with Container(id="button-container"):
-                yield Button("Archive", id="archive-button", variant="error")
+                if self.archived:
+                    yield Button("Restore", id="restore-button", variant="success")
+                else:
+                    yield Button("Archive", id="archive-button", variant="error")
                 yield Button("Close", id="close-button", variant="primary")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -466,6 +524,8 @@ class SkillDetailModal(ModalScreen):
             self.dismiss(None)
         elif event.button.id == "archive-button":
             self.dismiss(("archive", self.skill_name))
+        elif event.button.id == "restore-button":
+            self.dismiss(("restore", self.skill_name))
 
 
 class SkillCreateModal(ModalScreen):

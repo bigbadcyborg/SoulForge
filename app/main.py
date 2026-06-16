@@ -240,6 +240,11 @@ def _handle_skill_reject_cli(controller: ChatController) -> None:
     print("Skill suggestion rejected.")
 
 
+def _handle_skill_restore_cli(controller: ChatController, args: str) -> None:
+    outcome = controller.restore_skill_direct(args)
+    print(outcome.message)
+
+
 def _handle_skills_cli(controller: ChatController) -> None:
     active = controller.skill_manager.list_skills(status="active")
     archived = controller.skill_manager.list_skills(status="archived")
@@ -258,6 +263,59 @@ def _handle_skills_cli(controller: ChatController) -> None:
             f"\nPending suggestion: {controller.pending_skill_suggestion.name} "
             "(run /skill-accept or /skill-reject)"
         )
+
+
+def _handle_curator_review_cli(controller: ChatController) -> None:
+    result = controller.run_curator_review()
+    if result.message:
+        print(result.message)
+    if result.has_findings:
+        print()
+        print(controller.get_curator_review())
+        print("\nApprove: /curator-accept <finding_id>")
+        print("Ignore:  /curator-ignore <finding_id>")
+
+
+def _handle_curator_accept_cli(controller: ChatController, args: str) -> None:
+    finding_id = args.strip()
+    if not finding_id:
+        print("Usage: /curator-accept <finding_id>")
+        print(controller.get_curator_review())
+        return
+    outcome = controller.accept_curator_finding(finding_id)
+    print(outcome.message)
+
+
+def _handle_curator_ignore_cli(controller: ChatController, args: str) -> None:
+    finding_id = args.strip()
+    if not finding_id:
+        print("Usage: /curator-ignore <finding_id>")
+        return
+    controller.dismiss_curator_finding(finding_id)
+    print("Curator finding ignored.")
+
+
+def _handle_curator_archive_cli(controller: ChatController, args: str) -> None:
+    outcome = controller.archive_skill_direct(args)
+    print(outcome.message)
+
+
+def _handle_curator_compact_cli(controller: ChatController, args: str) -> None:
+    result = controller.compact_skill_direct(args)
+    if result.message:
+        print(result.message)
+    if result.has_findings and result.findings:
+        finding = result.findings[0]
+        print(f"\nFinding ID: {finding.finding_id}")
+        print(f"Run /curator-accept {finding.finding_id} to save compacted content.")
+
+
+def _handle_curator_cli(controller: ChatController) -> None:
+    visible = controller._visible_curator_findings()
+    if not visible:
+        print("No pending curator findings. Run /curator-review first.")
+        return
+    print(controller.get_curator_review())
 
 
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
@@ -320,6 +378,20 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         _handle_skill_accept_cli(controller)
     elif command == "/skill-reject":
         _handle_skill_reject_cli(controller)
+    elif command == "/skill-restore":
+        _handle_skill_restore_cli(controller, args)
+    elif command == "/curator":
+        _handle_curator_cli(controller)
+    elif command == "/curator-review":
+        _handle_curator_review_cli(controller)
+    elif command == "/curator-archive":
+        _handle_curator_archive_cli(controller, args)
+    elif command == "/curator-compact":
+        _handle_curator_compact_cli(controller, args)
+    elif command == "/curator-accept":
+        _handle_curator_accept_cli(controller, args)
+    elif command == "/curator-ignore":
+        _handle_curator_ignore_cli(controller, args)
     else:
         print(f"Unknown command: {command}. Type /help for available commands.")
 

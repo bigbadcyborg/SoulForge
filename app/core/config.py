@@ -163,6 +163,12 @@ class SkillsConfig:
 
 
 @dataclass
+class CuratorConfig:
+    stale_days: int = 30
+    bloat_max_chars: int = 1000
+
+
+@dataclass
 class TasksConfig:
     kanban_path: str = "./app/tasks/kanban.json"
 
@@ -175,6 +181,7 @@ class AppConfig:
     rag: RagConfig
     memory: MemoryConfig
     skills: SkillsConfig
+    curator: CuratorConfig
     tasks: TasksConfig
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -269,6 +276,12 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         success_window_turns=skills_section.get("successWindowTurns", 3),
     )
 
+    curator_section = _section(data, "curator")
+    curator = CuratorConfig(
+        stale_days=curator_section.get("staleDays", 30),
+        bloat_max_chars=curator_section.get("bloatMaxChars", 1000),
+    )
+
     tasks_section = _section(data, "tasks")
     tasks = TasksConfig(
         kanban_path=tasks_section.get("kanbanPath", "./app/tasks/kanban.json"),
@@ -281,6 +294,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         rag=rag,
         memory=memory,
         skills=skills,
+        curator=curator,
         tasks=tasks,
         raw=data,
     )

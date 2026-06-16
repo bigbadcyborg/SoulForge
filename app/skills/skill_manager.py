@@ -113,6 +113,10 @@ class SkillManager:
     def skill_exists(self, name: str) -> bool:
         return name in self._load_registry()
 
+    def is_active(self, name: str) -> bool:
+        meta = self._load_registry().get(name)
+        return meta is not None and meta.get("status") == "active"
+
     def list_skill_names(self) -> list[str]:
         return list(self._load_registry().keys())
 
@@ -196,6 +200,24 @@ class SkillManager:
         self._save_registry(registry)
         return True
 
+    def update_skill_content(self, name: str, content: str) -> bool:
+        """Overwrite an active skill file body (full markdown)."""
+        registry = self._load_registry()
+        meta = registry.get(name)
+        if not meta or meta.get("status") != "active":
+            return False
+
+        file_path = self.active_path / f"{name}.md"
+        if not file_path.exists():
+            return False
+
+        file_path.write_text(content.strip() + "\n", encoding="utf-8")
+        description = self.extract_frontmatter_field(content, "description")
+        if description:
+            meta["description"] = description
+        self._save_registry(registry)
+        return True
+
     def archive_skill(self, name: str) -> bool:
         """Move a skill from active to archived."""
         registry = self._load_registry()
@@ -211,6 +233,36 @@ class SkillManager:
             old_path.rename(new_path)
 
         meta["status"] = "archived"
+        self._save_registry(registry)
+        return True
+
+    def restore_skill(self, name: str) -> bool:
+        """Move a skill from archived back to active."""
+        registry = self._load_registry()
+        meta = registry.get(name)
+        if not meta or meta.get("status") != "archived":
+            return False
+
+        old_path = self.archived_path / f"{name}.md"
+        new_path = self.active_path / f"{name}.md"
+
+        if new_path.exists():
+            return False
+
+        if old_path.exists():
+            content = old_path.read_text(encoding="utf-8")
+            content = re.sub(
+                r"^status:\s*archived\s*$",
+                "status: active",
+                content,
+                count=1,
+                flags=re.MULTILINE | re.IGNORECASE,
+            )
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            new_path.write_text(content, encoding="utf-8")
+            old_path.unlink()
+
+        meta["status"] = "active"
         self._save_registry(registry)
         return True
 

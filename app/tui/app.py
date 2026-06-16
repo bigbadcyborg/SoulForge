@@ -34,6 +34,7 @@ from app.tui.widgets import (
     SkillCreateModal,
     SkillCrystallizeModal,
     SkillCrystallizeEditModal,
+    CuratorReviewModal,
 )
 
 
@@ -507,11 +508,17 @@ class SoulForgeApp(App):
 
     def _handle_skills_command(self) -> None:
         active_skills = self.controller.skill_manager.list_skills(status="active")
+        archived_skills = self.controller.skill_manager.list_skills(status="archived")
         pending_message = ""
         if self.controller.pending_skill_suggestion is not None:
             name = self.controller.pending_skill_suggestion.name
             pending_message = f"Suggested skill pending: {name} (run /crystallize or /skill-accept)"
-        modal = SkillViewerModal(active_skills, pending_message)
+        if not active_skills and archived_skills:
+            pending_message = (
+                (pending_message + " " if pending_message else "")
+                + f"No active skills ({len(archived_skills)} archived)."
+            )
+        modal = SkillViewerModal(active_skills, archived_skills, pending_message)
         self.app.push_screen(modal, self._handle_skills_modal_result)
 
     def _open_skill_crystallize_modal(self) -> None:
@@ -587,6 +594,67 @@ class SoulForgeApp(App):
         self.controller.reject_skill_suggestion()
         self._write_message("system", "Skill suggestion rejected.")
 
+    def _open_curator_review_modal(self) -> None:
+        findings = self.controller._visible_curator_findings()
+        if not findings:
+            self._write_message(
+                "system",
+                "No pending curator findings. Run /curator-review first.",
+            )
+            return
+        modal = CuratorReviewModal(findings[0], 0, len(findings))
+        self.app.push_screen(modal, self._handle_curator_review_result)
+
+    def _handle_curator_review_result(self, result: tuple[str, str] | None) -> None:
+        if result is None:
+            return
+        action, finding_id = result
+        if action == "approve":
+            outcome = self.controller.accept_curator_finding(finding_id)
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._refresh_features()
+        elif action == "ignore":
+            self.controller.dismiss_curator_finding(finding_id)
+            self._write_message("system", "Curator finding ignored.")
+
+        remaining = self.controller._visible_curator_findings()
+        if remaining:
+            self._open_curator_review_modal()
+
+    def _handle_curator_command(self) -> None:
+        self._open_curator_review_modal()
+
+    def _handle_curator_review_command(self) -> None:
+        self.status_bar.set_state("Running curator review...")
+        result = self.controller.run_curator_review()
+        if result.message:
+            self._write_message("system", result.message)
+        self.status_bar.set_state("Ready")
+        if result.has_findings:
+            self._open_curator_review_modal()
+
+    def _handle_curator_archive_command(self, args: str) -> None:
+        outcome = self.controller.archive_skill_direct(args)
+        self._write_message("system", outcome.message)
+        if outcome.success:
+            self._refresh_features()
+
+    def _handle_curator_compact_command(self, args: str) -> None:
+        self.status_bar.set_state("Compacting skill...")
+        result = self.controller.compact_skill_direct(args)
+        if result.message:
+            self._write_message("system", result.message)
+        self.status_bar.set_state("Ready")
+        if result.has_findings:
+            self._open_curator_review_modal()
+
+    def _handle_skill_restore_command(self, args: str) -> None:
+        outcome = self.controller.restore_skill_direct(args)
+        self._write_message("system", outcome.message)
+        if outcome.success:
+            self._refresh_features()
+
     def _handle_skills_modal_result(self, result: Any) -> None:
         if result == "new":
             self.app.push_screen(SkillCreateModal(), self._handle_skill_create_result)
@@ -594,16 +662,23 @@ class SoulForgeApp(App):
             skill_name = result[1]
             content = self.controller.skill_manager.get_skill_content(skill_name)
             if content:
-                modal = SkillDetailModal(skill_name, content)
+                is_archived = not self.controller.skill_manager.is_active(skill_name)
+                modal = SkillDetailModal(skill_name, content, archived=is_archived)
                 self.app.push_screen(modal, self._handle_skills_modal_result)
         elif isinstance(result, tuple) and result[0] == "archive":
             skill_name = result[1]
             if self.controller.skill_manager.archive_skill(skill_name):
                 self._write_message("system", f"Skill '{skill_name}' archived.")
                 if self.controller.features.is_enabled("skills"):
-                    self.controller.reload_soul() # Rebuilds prompt
+                    self.controller.reload_soul()
             else:
                 self._write_message("system", f"Failed to archive skill '{skill_name}'.")
+        elif isinstance(result, tuple) and result[0] == "restore":
+            skill_name = result[1]
+            outcome = self.controller.restore_skill_direct(skill_name)
+            self._write_message("system", outcome.message)
+            if outcome.success:
+                self._refresh_features()
 
     def _handle_skill_create_result(self, result: dict[str, str] | None) -> None:
         if result:
@@ -696,6 +771,16 @@ class SoulForgeApp(App):
             self._handle_skill_accept_command()
         elif command == "/skill-reject":
             self._handle_skill_reject_command()
+        elif command == "/skill-restore":
+            self._handle_skill_restore_command(args)
+        elif command == "/curator":
+            self._handle_curator_command()
+        elif command == "/curator-review":
+            self._handle_curator_review_command()
+        elif command == "/curator-archive":
+            self._handle_curator_archive_command(args)
+        elif command == "/curator-compact":
+            self._handle_curator_compact_command(args)
         else:
             self._write_message(
                 "system", f"Unknown command: {command}. Type /help."

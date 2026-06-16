@@ -127,6 +127,41 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "/skill-reject",
         "Discard the pending skill draft without saving",
     ),
+    CommandHelp(
+        "Skills",
+        "/skill-restore <name>",
+        "Restore an archived skill to app/skills/active/",
+    ),
+    CommandHelp(
+        "Curator",
+        "/curator",
+        "Open curator review modal for pending findings (TUI)",
+    ),
+    CommandHelp(
+        "Curator",
+        "/curator-review",
+        "Scan active skills for stale, bloated, or duplicate entries",
+    ),
+    CommandHelp(
+        "Curator",
+        "/curator-archive <skill>",
+        "Archive a skill immediately (moves to skills/archived/)",
+    ),
+    CommandHelp(
+        "Curator",
+        "/curator-compact <skill>",
+        "Draft a shorter version of a bloated skill for approval",
+    ),
+    CommandHelp(
+        "Curator",
+        "/curator-accept <id>",
+        "Apply a curator finding by ID (CLI; TUI uses Approve in modal)",
+    ),
+    CommandHelp(
+        "Curator",
+        "/curator-ignore <id>",
+        "Dismiss a curator finding by ID (CLI)",
+    ),
 )
 
 

@@ -8,6 +8,7 @@ logic UI-agnostic means the same code path powers every front end.
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Iterator
 
@@ -25,6 +26,15 @@ from app.memory.memory_reviewer import (
 )
 from app.rag.ingest import IngestResult, ingest_documents
 from app.rag.retriever import Retriever, RetrievedChunk, get_store_stats
+from app.skills.curator import (
+    ACTION_ARCHIVE,
+    ACTION_COMPACT,
+    CuratorFinding,
+    CuratorReviewResult,
+    format_review_view,
+    generate_compaction,
+    run_full_review,
+)
 from app.skills.skill_crystallizer import (
     SkillSuggestion,
     format_suggestion_view as format_skill_suggestion_view,
@@ -59,6 +69,12 @@ class SkillCrystallizeResult:
     message: str = ""
 
 
+@dataclass
+class CuratorActionResult:
+    success: bool
+    message: str = ""
+
+
 def load_soul() -> str:
     """Load the persona from SOUL.md, or fall back to a neutral default."""
     if not SOUL_PATH.exists():
@@ -82,6 +98,8 @@ class ChatController:
         self.pending_suggestion: MemorySuggestion | None = None
         self.pending_skill_suggestion: SkillSuggestion | None = None
         self._pending_crystallize_fingerprint: str = ""
+        self.pending_curator_findings: list[CuratorFinding] = []
+        self._dismissed_curator_ids: set[str] = set()
 
         # RAG is initialized lazily to avoid loading embedding model at startup
         self._retriever: Retriever | None = None
@@ -434,6 +452,223 @@ class ChatController:
     def reject_skill_suggestion(self) -> None:
         """Discard pending skill suggestion without saving."""
         self.pending_skill_suggestion = None
+
+    def _visible_curator_findings(self) -> list[CuratorFinding]:
+        self._prune_obsolete_curator_findings()
+        return [
+            f
+            for f in self.pending_curator_findings
+            if f.finding_id not in self._dismissed_curator_ids
+            and self._finding_still_applicable(f)
+        ]
+
+    def run_curator_review(self) -> CuratorReviewResult:
+        """Analyze active skills and store curator findings."""
+        if not self.features.is_enabled("curator"):
+            return CuratorReviewResult(
+                findings=[],
+                message="Curator is disabled. Run /features curator on.",
+            )
+
+        result = run_full_review(
+            self.runtime,
+            self.config,
+            self.skill_manager,
+            use_llm=True,
+        )
+        self.pending_curator_findings = result.findings
+        self._dismissed_curator_ids.clear()
+        return result
+
+    def get_curator_review(self) -> str:
+        visible = self._visible_curator_findings()
+        return format_review_view(visible)
+
+    def dismiss_curator_finding(self, finding_id: str) -> None:
+        self._dismissed_curator_ids.add(finding_id)
+
+    def _dismiss_findings_for_skill(self, skill_name: str) -> None:
+        """Remove all pending findings targeting a skill (e.g. after archive)."""
+        for finding in self.pending_curator_findings:
+            if finding.skill_name == skill_name:
+                self._dismissed_curator_ids.add(finding.finding_id)
+
+    def _finding_still_applicable(self, finding: CuratorFinding) -> bool:
+        """True when the skill is still active and the action can be applied."""
+        if not self.skill_manager.is_active(finding.skill_name):
+            return False
+        if finding.proposed_action == ACTION_ARCHIVE:
+            return True
+        if finding.proposed_action == ACTION_COMPACT:
+            return bool(finding.proposed_content) or bool(
+                self.skill_manager.get_skill_content(finding.skill_name)
+            )
+        return True
+
+    def _prune_obsolete_curator_findings(self) -> None:
+        """Auto-dismiss findings that no longer apply (skill archived, etc.)."""
+        for finding in self.pending_curator_findings:
+            if finding.finding_id in self._dismissed_curator_ids:
+                continue
+            if not self._finding_still_applicable(finding):
+                self._dismissed_curator_ids.add(finding.finding_id)
+
+    def clear_curator_findings(self) -> None:
+        self.pending_curator_findings = []
+        self._dismissed_curator_ids.clear()
+
+    def accept_curator_finding(self, finding_id: str) -> CuratorActionResult:
+        """Apply a curator suggestion (archive or compact)."""
+        if not self.features.is_enabled("curator"):
+            return CuratorActionResult(
+                success=False,
+                message="Curator is disabled. Run /features curator on.",
+            )
+
+        self._prune_obsolete_curator_findings()
+
+        finding = next(
+            (f for f in self.pending_curator_findings if f.finding_id == finding_id),
+            None,
+        )
+        if finding is None:
+            return CuratorActionResult(
+                success=False,
+                message=f"Finding '{finding_id}' not found.",
+            )
+
+        if not self._finding_still_applicable(finding):
+            self._dismiss_findings_for_skill(finding.skill_name)
+            return CuratorActionResult(
+                success=True,
+                message=(
+                    f"Finding for '{finding.skill_name}' no longer applies "
+                    "(skill may already be archived). Cleared."
+                ),
+            )
+
+        if finding.proposed_action == ACTION_ARCHIVE:
+            if not self.skill_manager.archive_skill(finding.skill_name):
+                return CuratorActionResult(
+                    success=False,
+                    message=f"Failed to archive skill '{finding.skill_name}'.",
+                )
+            self._dismiss_findings_for_skill(finding.skill_name)
+            self._rebuild_system_prompt()
+            return CuratorActionResult(
+                success=True,
+                message=f"Archived skill '{finding.skill_name}'.",
+            )
+
+        if finding.proposed_action == ACTION_COMPACT:
+            content = finding.proposed_content
+            if not content:
+                content = self.skill_manager.get_skill_content(finding.skill_name) or ""
+                content = generate_compaction(
+                    self.runtime,
+                    content,
+                    self.config.curator.bloat_max_chars,
+                )
+            if not self.skill_manager.update_skill_content(finding.skill_name, content):
+                if not self.skill_manager.is_active(finding.skill_name):
+                    self._dismiss_findings_for_skill(finding.skill_name)
+                    return CuratorActionResult(
+                        success=True,
+                        message=(
+                            f"Skill '{finding.skill_name}' is archived; "
+                            "compact finding cleared."
+                        ),
+                    )
+                return CuratorActionResult(
+                    success=False,
+                    message=f"Failed to compact skill '{finding.skill_name}'.",
+                )
+            self._dismiss_findings_for_skill(finding.skill_name)
+            self._rebuild_system_prompt()
+            return CuratorActionResult(
+                success=True,
+                message=f"Compacted skill '{finding.skill_name}'.",
+            )
+
+        return CuratorActionResult(
+            success=False,
+            message=f"Unknown action '{finding.proposed_action}'.",
+        )
+
+    def archive_skill_direct(self, name: str) -> CuratorActionResult:
+        """Fast-path archive without curator review."""
+        if not name.strip():
+            return CuratorActionResult(success=False, message="Skill name required.")
+        skill_name = name.strip()
+        if not self.skill_manager.archive_skill(skill_name):
+            return CuratorActionResult(
+                success=False,
+                message=f"Failed to archive skill '{skill_name}'.",
+            )
+        self._dismiss_findings_for_skill(skill_name)
+        self._rebuild_system_prompt()
+        return CuratorActionResult(success=True, message=f"Archived skill '{skill_name}'.")
+
+    def restore_skill_direct(self, name: str) -> CuratorActionResult:
+        """Restore an archived skill to active."""
+        if not name.strip():
+            return CuratorActionResult(success=False, message="Skill name required.")
+        skill_name = name.strip()
+        if not self.skill_manager.restore_skill(skill_name):
+            return CuratorActionResult(
+                success=False,
+                message=(
+                    f"Failed to restore skill '{skill_name}'. "
+                    "It may not exist or is already active."
+                ),
+            )
+        self._rebuild_system_prompt()
+        return CuratorActionResult(
+            success=True,
+            message=f"Restored skill '{skill_name}' to active.",
+        )
+
+    def compact_skill_direct(self, name: str) -> CuratorReviewResult:
+        """Fast-path compaction: generate a single bloat finding for a skill."""
+        if not self.features.is_enabled("curator"):
+            return CuratorReviewResult(
+                findings=[],
+                message="Curator is disabled. Run /features curator on.",
+            )
+
+        skill_name = name.strip()
+        if not skill_name:
+            return CuratorReviewResult(
+                findings=[],
+                message="Skill name required. Usage: /curator-compact <skill>",
+            )
+
+        content = self.skill_manager.get_skill_content(skill_name)
+        if not content:
+            return CuratorReviewResult(
+                findings=[],
+                message=f"Skill '{skill_name}' not found.",
+            )
+
+        compacted = generate_compaction(
+            self.runtime,
+            content,
+            self.config.curator.bloat_max_chars,
+        )
+        finding = CuratorFinding(
+            finding_id=uuid.uuid4().hex[:12],
+            finding_type="bloat",
+            skill_name=skill_name,
+            rationale=f"Compact '{skill_name}' from {len(content)} to target size.",
+            proposed_action=ACTION_COMPACT,
+            proposed_content=compacted,
+        )
+        self.pending_curator_findings = [finding]
+        self._dismissed_curator_ids.clear()
+        return CuratorReviewResult(
+            findings=[finding],
+            message=f"Compaction draft ready for '{skill_name}'.",
+        )
 
     def add_user_turn(self, user_input: str) -> list[RetrievedChunk]:
         """Retrieve context, append the user message, and return any sources."""
