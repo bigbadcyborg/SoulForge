@@ -210,7 +210,7 @@ Run:
 
 ```bash
 source .venv-wsl/bin/activate
-python chatbot.py
+python -m app.main
 ```
 
 A GPU-enabled `Llama` setup should use:
@@ -400,6 +400,31 @@ The script runs a series of read-only checks and reports **OK/WARN/FAIL** for:
 
 Use the output to fix issues, then re-run `./doctor.sh` until everything is green.
 
+## Example starter files
+
+Iteration 14 includes starter assets under `examples/`:
+
+* `examples/config.example.yaml`
+* `examples/SOUL.example.md`
+* `examples/docs/example.txt`
+* `examples/skills/example_skill.md`
+
+Copy them into place:
+
+```bash
+cp examples/config.example.yaml config.yaml
+cp examples/SOUL.example.md SOUL.md
+mkdir -p docs
+cp -r examples/docs/* docs/
+```
+
+Optional: copy the sample skill for testing:
+
+```bash
+mkdir -p app/skills/active
+cp examples/skills/example_skill.md app/skills/active/example_skill.md
+```
+
 ## Startup Scripts
 
 ### Windows PowerShell Startup
@@ -432,7 +457,7 @@ export LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH
 
 source .venv-wsl/bin/activate
 
-python chatbot.py
+python -m app.main
 
 exec bash
 ```

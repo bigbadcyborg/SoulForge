@@ -1,0 +1,4 @@
+SoulForge is a local chatbot project that runs GGUF models with llama-cpp-python.
+It supports optional RAG via ChromaDB, persistent memory files, and a Textual TUI.
+
+Use this file as a starter document for `/ingest` tests.

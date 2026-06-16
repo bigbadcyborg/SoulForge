@@ -1,10 +1,14 @@
 # Core runtime dependencies for SoulForge TUI.
-# llama-cpp-python is built from source with CUDA on WSL (see README).
+# Keep llama-cpp-python unpinned because many setups rebuild from source with CUDA.
 llama-cpp-python
-chromadb
-PyYAML
-textual
-pypdf
-pdf2image
-pytesseract
-Pillow
+
+# Core app dependencies (version-ranged for stability).
+chromadb>=0.5,<1.0
+PyYAML>=6.0,<7.0
+textual>=0.67,<1.0
+
+# Document ingestion / OCR helpers.
+pypdf>=4.0,<6.0
+pdf2image>=1.17,<2.0
+pytesseract>=0.3.10,<0.4
+Pillow>=10.0,<12.0

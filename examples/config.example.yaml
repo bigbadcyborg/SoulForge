@@ -1,0 +1,86 @@
+model:
+  chatModelPath: ./models/NemoMix-Unleashed-12B-Q4_K_M.gguf
+  embeddingModelPath: ./models/embedding-model.gguf
+  contextSize: 8192
+  gpuLayers: -1
+  threads: 8
+  chatFormat: mistral-instruct
+
+generation:
+  temperature: 0.75
+  topP: 0.95
+  repeatPenalty: 1.1
+  maxTokens: 700
+  stop:
+    - </s>
+    - "User:"
+    - "You:"
+
+features:
+  soul: true
+  rag: false
+  memory: true
+  skills: false
+  curator: false
+  kanban: false
+  streaming: true
+  showSources: true
+  tools: false
+
+rag:
+  dbPath: ./chromaDb
+  docsPath: ./docs
+  collectionName: localDocs
+  topK: 5
+  chunkSize: 1200
+  chunkOverlap: 200
+  pdfOcrEnabled: true
+  pdfOcrLang: eng
+  pdfMinTextChars: 32
+
+memory:
+  userFile: ./app/memory/user.md
+  memoryFile: ./app/memory/memory.md
+  sessionFile: ./app/memory/session.md
+  updateEveryTurns: 10
+  maxUserChars: 3000
+  maxMemoryChars: 6000
+  maxSessionChars: 4000
+
+skills:
+  activePath: ./app/skills/active
+  archivedPath: ./app/skills/archived
+  registryPath: ./app/skills/registry.json
+  workflowLogPath: ./app/skills/workflow_log.json
+  autoCreate: false
+  minSuccessfulRepeats: 3
+  successWindowTurns: 3
+
+curator:
+  staleDays: 30
+  bloatMaxChars: 1000
+
+tasks:
+  kanbanPath: ./app/tasks/kanban.json
+
+sessions:
+  storePath: ./app/sessions
+  maxSavedSessions: 50
+
+logging:
+  logPath: ./logs/soulforge.log
+  level: info
+  console: false
+
+tools:
+  allowWrite: false
+  allowShell: false
+  readRoots:
+    - ./docs
+    - ./app
+  writeRoots:
+    - ./app/memory
+    - ./app/tasks
+  maxReadBytes: 65536
+  shellAllowlist: []
+  autoApproveReadOnly: true
