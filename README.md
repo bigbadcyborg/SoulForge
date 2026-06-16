@@ -71,6 +71,46 @@ chatbot-uncensored/
 * `llama-cpp-python`
 * `chromadb`
 
+## Quick start (recommended)
+
+These steps assume Windows 11 with WSL Ubuntu installed.
+
+1. **Clone the repo (Windows or WSL)**  
+   ```bash
+   git clone https://github.com/bigbadcyborg/chatbot.git
+   cd chatbot
+   ```
+
+2. **Run setup in WSL**  
+   Inside Ubuntu on WSL:
+   ```bash
+   ./setup.sh
+   ```
+   This script wraps `install-wsl.sh`, installs apt packages, creates `.venv-wsl`, and installs Python dependencies from `requirements.txt`.  
+   For a CUDA build of `llama-cpp-python`, run:
+   ```bash
+   ./setup.sh --with-cuda
+   ```
+
+3. **Run basic checks**  
+   Still inside WSL:
+   ```bash
+   ./doctor.sh
+   ```
+   The doctor script checks common issues (missing venv/deps, config, models, CUDA, and Git hygiene) and prints remediation tips.
+
+4. **Start the chatbot (Windows or WSL)**  
+   - From **Windows PowerShell** (recommended once WSL is set up):
+     ```powershell
+     .\start-chatbot-windows.ps1
+     ```
+   - Or directly inside **WSL**:
+     ```bash
+     ./start-chatbot.sh
+     ```
+
+After startup, type `/help` in the TUI for all commands, or try `/status`, `/ingest`, `/rag on`, and `/tools`.
+
 ## WSL Setup
 
 Install Ubuntu through PowerShell:
@@ -341,6 +381,24 @@ In TUI:
 * Run `/tools` (or `/tool`) to open the workshop.
 * Use **Add Shell Command** to append a command prefix.
 * Use **Test Tool** to run a manual test and inspect output.
+
+## Doctor script
+
+After running `./setup.sh`, you can use the doctor script to validate your environment:
+
+```bash
+./doctor.sh
+```
+
+The script runs a series of read-only checks and reports **OK/WARN/FAIL** for:
+
+* WSL environment (Linux, not Git Bash)
+* Presence of `.venv-wsl` and key Python packages
+* Optional CUDA support (`nvidia-smi`, `libllama.so` linkage)
+* Existence and basic validity of `config.yaml`, model paths, and `docs/`
+* Git hygiene (no `models/`, `chromaDb/`, `.venv-wsl/`, or `logs/` staged)
+
+Use the output to fix issues, then re-run `./doctor.sh` until everything is green.
 
 ## Startup Scripts
 
