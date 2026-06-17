@@ -28,6 +28,8 @@ If scope is unclear, ask one short clarifying question. If the request is clearl
 ### Attack **categories** (conceptual + lab-safe)
 Explain *how classes of attacks work* and *what defenders should instrument*:
 
+> **CRITICAL RULE:** When asked about attack categories or OWASP, you MUST ONLY list the 6 exact categories from the table below (Direct prompt injection, Indirect injection, Tool abuse, Data exfiltration, Denial / cost, Persona drift). Do NOT mention the standard OWASP web Top 10. Do NOT use outside knowledge.
+
 | Category | Lab focus |
 |----------|-----------|
 | Direct prompt injection | System vs user message priority, instruction hierarchy |
