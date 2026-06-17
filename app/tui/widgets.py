@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from rich.text import Text
 from textual import events
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
@@ -416,6 +416,45 @@ class MemoryViewerModal(ModalScreen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close-button":
             self.dismiss()
+
+
+class MemoryAnalysisModal(ModalScreen):
+    """Modal for browsing static and vector-backed episodic memory."""
+
+    def __init__(
+        self,
+        content: str,
+        on_search: Callable[[str], str],
+    ) -> None:
+        super().__init__()
+        self.content = content
+        self.on_search = on_search
+
+    def compose(self):
+        with Vertical(id="memory-analysis-container"):
+            yield Label("Memory analysis:")
+            with Horizontal(id="memory-analysis-search-row"):
+                yield Input(
+                    placeholder="Semantic search episodic memory...",
+                    id="memory-analysis-query",
+                )
+                yield Button("Search", id="memory-analysis-search", variant="primary")
+                yield Button("Recent", id="memory-analysis-recent")
+            with VerticalScroll(id="memory-analysis-scroll"):
+                yield Static(self.content, id="memory-analysis-content")
+            with Container(id="button-container"):
+                yield Button("Close", id="close-button", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss()
+            return
+        if event.button.id in ("memory-analysis-search", "memory-analysis-recent"):
+            query = ""
+            if event.button.id == "memory-analysis-search":
+                query = self.query_one("#memory-analysis-query", Input).value.strip()
+            content = self.on_search(query)
+            self.query_one("#memory-analysis-content", Static).update(content)
 
 
 class DiagnosticsModal(ModalScreen):

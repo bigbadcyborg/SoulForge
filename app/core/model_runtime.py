@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 from app.core.compute_backend import UNKNOWN, ComputeBackend, detect_compute_backend
 from app.core.config import AppConfig
+from app.utils.audit_logger import append_audit_event
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from llama_cpp import Llama
@@ -139,16 +140,41 @@ class ModelRuntime:
         Returns the raw llama_cpp response, or a streaming iterator when
         ``stream`` is True.
         """
+        params = self._completion_params(**overrides)
         if stream:
             return self._stream_chat_completion(messages, **overrides)
 
         with self._lock:
             chat = self._load_chat_model_unlocked()
-            return chat.create_chat_completion(
-                messages=messages,
-                stream=False,
-                **self._completion_params(**overrides),
+            try:
+                response = chat.create_chat_completion(
+                    messages=messages,
+                    stream=False,
+                    **params,
+                )
+            except Exception as error:
+                append_audit_event(
+                    self.config,
+                    messages=messages,
+                    params=params,
+                    stream=False,
+                    error=str(error),
+                )
+                raise
+
+            text = (
+                response.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
             )
+            append_audit_event(
+                self.config,
+                messages=messages,
+                params=params,
+                response_text=text,
+                stream=False,
+            )
+            return response
 
     def _stream_chat_completion(
         self,
@@ -156,15 +182,39 @@ class ModelRuntime:
         **overrides: Any,
     ) -> Iterator[dict[str, Any]]:
         """Stream tokens while holding the runtime lock for the full decode."""
+        params = self._completion_params(**overrides)
         with self._lock:
             chat = self._load_chat_model_unlocked()
-            stream = chat.create_chat_completion(
+            response_parts: list[str] = []
+            try:
+                stream = chat.create_chat_completion(
+                    messages=messages,
+                    stream=True,
+                    **params,
+                )
+                for chunk in stream:
+                    delta = chunk["choices"][0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        response_parts.append(content)
+                    yield chunk
+            except Exception as error:
+                append_audit_event(
+                    self.config,
+                    messages=messages,
+                    params=params,
+                    response_text="".join(response_parts),
+                    stream=True,
+                    error=str(error),
+                )
+                raise
+            append_audit_event(
+                self.config,
                 messages=messages,
+                params=params,
+                response_text="".join(response_parts),
                 stream=True,
-                **self._completion_params(**overrides),
             )
-            for chunk in stream:
-                yield chunk
 
     @staticmethod
     def iter_stream_text(stream: Iterator[dict[str, Any]]) -> Iterator[str]:

@@ -152,6 +152,7 @@ class PromptBuilder:
         use_rag: bool = True,
         memory: MemorySnapshot | None = None,
         use_memory: bool = False,
+        episodic_context: str = "",
     ) -> str:
         """Combine memory, retrieved RAG context, and the user's question."""
         sections: list[str] = []
@@ -166,6 +167,14 @@ class PromptBuilder:
                     "You cannot save new facts to these files. Never claim you updated "
                     "memory. To persist new info, tell the user to run /memory-edit."
                 )
+
+        if use_memory and episodic_context.strip():
+            sections.append(
+                "RELEVANT EPISODIC MEMORY (read-only conversation history):\n"
+                f"{episodic_context.strip()}\n"
+                "Use these prior turns only when relevant. Do not claim to have "
+                "saved new facts unless the user approved memory changes."
+            )
 
         if use_rag and context_text.strip():
             sections.append(

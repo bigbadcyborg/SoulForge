@@ -239,6 +239,40 @@ MemoryViewerModal {
     color: $text-muted;
 }
 
+MemoryAnalysisModal {
+    align: center middle;
+}
+
+#memory-analysis-container {
+    width: 90;
+    height: 34;
+    background: $surface;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#memory-analysis-search-row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#memory-analysis-query {
+    width: 1fr;
+    margin-right: 1;
+}
+
+#memory-analysis-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+    border: solid $panel;
+    padding: 0 1;
+}
+
+#memory-analysis-content {
+    width: 100%;
+    color: $text-muted;
+}
+
 /* Diagnostics / Config Modal */
 DiagnosticsModal {
     align: center middle;

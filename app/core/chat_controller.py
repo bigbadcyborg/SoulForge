@@ -30,6 +30,11 @@ from app.core.model_catalog import (
 )
 from app.core.model_runtime import ModelRuntime
 from app.core.prompt_builder import PromptBuilder
+from app.memory.episodic import (
+    EpisodicMemoryResult,
+    EpisodicMemoryStore,
+    format_episodic_results,
+)
 from app.memory.memory_manager import MemoryManager, MemorySnapshot
 from app.memory.memory_reviewer import (
     MemorySuggestion,
@@ -53,6 +58,11 @@ from app.skills.skill_crystallizer import (
     format_suggestion_view as format_skill_suggestion_view,
     generate_suggestion as generate_skill_suggestion,
     resolve_unique_name,
+)
+from app.skills.simulator import (
+    available_simulations,
+    format_simulation_report,
+    run_simulation,
 )
 from app.skills.skill_manager import SkillManager
 from app.skills.workflow_observer import WorkflowMarkResult, WorkflowObserver
@@ -165,6 +175,7 @@ class ChatController:
         self.runtime = ModelRuntime(config)
         self.prompt_builder = PromptBuilder(config)
         self.memory_manager = MemoryManager(config)
+        self.episodic_memory = EpisodicMemoryStore(config, self.runtime)
         self.skill_manager = SkillManager(config)
         self.task_manager = TaskManager(config)
         self.session_manager = SessionManager(config)
@@ -190,6 +201,9 @@ class ChatController:
         self.memory: MemorySnapshot | None = None
         self.messages: list[dict[str, str]] = []
         self.last_retrieved_chunks: list[RetrievedChunk] = []
+        self.last_episodic_results: list[EpisodicMemoryResult] = []
+        self._last_user_input: str = ""
+        self._last_assistant_reply: str = ""
         self.loaded: bool = False
 
     def _on_feature_change(self, key: str, enabled: bool) -> None:
@@ -364,6 +378,37 @@ class ChatController:
         self.pending_suggestion = None
         self.reload_memory()
 
+    def search_episodic_memory(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> list[EpisodicMemoryResult]:
+        """Search vector-backed conversation memory."""
+        return self.episodic_memory.search(query, limit=limit)
+
+    def recent_episodic_memory(self, *, limit: int = 10) -> list[EpisodicMemoryResult]:
+        """Return recent vector-backed conversation memory."""
+        return self.episodic_memory.recent(limit=limit)
+
+    def format_memory_analysis(self, query: str = "") -> str:
+        """Return static memory plus episodic memory results."""
+        self.reload_memory()
+        sections = [self.get_memory_view()]
+        if query.strip():
+            results = self.search_episodic_memory(query, limit=8)
+            sections.append(
+                f"--- episodic_memory search: {query.strip()} ---\n"
+                f"{format_episodic_results(results)}"
+            )
+        else:
+            results = self.recent_episodic_memory(limit=8)
+            sections.append(
+                "--- recent episodic_memory ---\n"
+                f"{format_episodic_results(results)}"
+            )
+        return "\n\n".join(sections)
+
     def enable_memory(self) -> None:
         """Enable memory injection."""
         self.set_feature("memory", True)
@@ -378,7 +423,18 @@ class ChatController:
             return TurnReviewResult(self.turn_count, False, False)
 
         self.turn_count += 1
+        self._store_episodic_turn()
         return self._run_memory_review_if_due()
+
+    def _store_episodic_turn(self) -> None:
+        if not (self._last_user_input.strip() or self._last_assistant_reply.strip()):
+            return
+        self.episodic_memory.add_turn(
+            turn_id=str(uuid.uuid4()),
+            user=self._last_user_input,
+            assistant=self._last_assistant_reply,
+            turn_count=self.turn_count,
+        )
 
     def maybe_trigger_memory_review(self) -> bool:
         """Run review at the current turn count without incrementing."""
@@ -1234,6 +1290,8 @@ class ChatController:
 
     def add_user_turn(self, user_input: str) -> list[RetrievedChunk]:
         """Retrieve context, append the user message, and return any sources."""
+        self._last_user_input = user_input
+        self._last_assistant_reply = ""
         if self.features.is_enabled("memory"):
             self.reload_memory()
 
@@ -1245,12 +1303,25 @@ class ChatController:
                 chunks = [c for c in chunks if c.source in self.selected_sources]
             context_text = Retriever.format_context(chunks)
 
+        episodic_context = ""
+        self.last_episodic_results = []
+        if self.features.is_enabled("memory"):
+            self.last_episodic_results = self.search_episodic_memory(
+                user_input,
+                limit=3,
+            )
+            if self.last_episodic_results:
+                episodic_context = format_episodic_results(
+                    self.last_episodic_results
+                )
+
         user_turn = self.prompt_builder.build_user_turn(
             user_input,
             context_text,
             use_rag=self.features.is_enabled("rag"),
             memory=self.memory,
             use_memory=self.features.is_enabled("memory"),
+            episodic_context=episodic_context,
         )
         self.messages.append({"role": "user", "content": user_turn})
         self.last_retrieved_chunks = chunks
@@ -1429,6 +1500,7 @@ class ChatController:
         return ToolTurnResult(display, auto_results, pending, None)
 
     def _set_last_assistant_content(self, content: str) -> None:
+        self._last_assistant_reply = content
         if self.messages and self.messages[-1]["role"] == "assistant":
             self.messages[-1]["content"] = content
         else:
@@ -1536,6 +1608,21 @@ class ChatController:
                 error=str(error),
                 status="failed",
             )
+
+    def run_attack_simulation(self, attack_type: str = "all") -> str:
+        """Run built-in red-team simulation payloads without mutating chat history."""
+        if attack_type.strip().lower() in ("", "list"):
+            return (
+                "Available simulations:\n  "
+                + "\n  ".join(available_simulations())
+                + "\n  all"
+            )
+        result = run_simulation(
+            self.runtime,
+            system_prompt=self._build_system_prompt(),
+            attack_type=attack_type,
+        )
+        return format_simulation_report(result)
 
     def add_shell_allowlist_entry(self, command: str) -> str:
         command = command.strip()

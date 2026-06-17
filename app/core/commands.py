@@ -94,6 +94,11 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "Show recent tool call audit log entries",
     ),
     CommandHelp(
+        "Testing",
+        "/simulate [type|list|all]",
+        "Run built-in red-team simulation payloads and show pass/fail results",
+    ),
+    CommandHelp(
         "Tools",
         "/tool-approve <id>",
         "Approve and execute a pending tool call (CLI)",
@@ -151,6 +156,11 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "Memory",
         "/memory",
         "View user.md, memory.md, and session.md with character counts",
+    ),
+    CommandHelp(
+        "Memory",
+        "/memory-analysis [query]",
+        "Analyze static memory and search vector-backed episodic memory",
     ),
     CommandHelp(
         "Memory",
