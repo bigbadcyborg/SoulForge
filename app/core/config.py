@@ -62,6 +62,7 @@ class FeatureConfig:
     skills: bool = False
     curator: bool = False
     kanban: bool = False
+    agents: bool = False
     streaming: bool = True
     show_sources: bool = True
     tools: bool = False
@@ -75,6 +76,7 @@ FEATURE_YAML_KEYS: dict[str, str] = {
     "skills": "skills",
     "curator": "curator",
     "kanban": "kanban",
+    "agents": "agents",
     "streaming": "streaming",
     "show_sources": "showSources",
     "tools": "tools",
@@ -88,6 +90,7 @@ FEATURE_DISPLAY_NAMES: dict[str, str] = {
     "skills": "skills",
     "curator": "curator",
     "kanban": "kanban",
+    "agents": "agents",
     "show_sources": "sources",
     "streaming": "streaming",
     "tools": "tools",
@@ -191,6 +194,78 @@ class SessionsConfig:
 
 
 @dataclass
+class AgentModelProfileConfig:
+    chat_model_path: str | None = None
+    residency: str = "swap"  # resident | swap
+    temperature: float | None = None
+    top_p: float | None = None
+    repeat_penalty: float | None = None
+    max_tokens: int | None = None
+    chat_format: str | None = None
+
+    @property
+    def chat_model(self) -> Path | None:
+        if not self.chat_model_path:
+            return None
+        return resolve_path(self.chat_model_path)
+
+
+@dataclass
+class AgentRoleConfig:
+    model_profile: str = "default"
+    allowed_tools: list[str] = field(default_factory=list)
+
+
+def default_agent_model_profiles() -> dict[str, AgentModelProfileConfig]:
+    return {
+        "orchestrator": AgentModelProfileConfig(
+            residency="swap",
+            temperature=0.2,
+            max_tokens=1400,
+        ),
+        "creator": AgentModelProfileConfig(
+            residency="resident",
+            temperature=0.35,
+            max_tokens=1800,
+        ),
+        "critic_executor": AgentModelProfileConfig(
+            residency="resident",
+            temperature=0.1,
+            max_tokens=1000,
+        ),
+    }
+
+
+def default_agent_roles() -> dict[str, AgentRoleConfig]:
+    return {
+        "orchestrator": AgentRoleConfig(model_profile="orchestrator"),
+        "researcher": AgentRoleConfig(model_profile="critic_executor"),
+        "creator": AgentRoleConfig(model_profile="creator"),
+        "executor": AgentRoleConfig(model_profile="critic_executor"),
+        "critic": AgentRoleConfig(model_profile="critic_executor"),
+        "synthesizer": AgentRoleConfig(model_profile="creator"),
+    }
+
+
+@dataclass
+class AgentsConfig:
+    runs_path: str = "./app/agents/runs"
+    max_iterations: int = 3
+    require_approval: bool = True
+    strict_json: bool = True
+    residency_mode: str = "hybrid"  # hybrid | sequential
+    default_profile: str = "creator"
+    model_profiles: dict[str, AgentModelProfileConfig] = field(
+        default_factory=default_agent_model_profiles
+    )
+    roles: dict[str, AgentRoleConfig] = field(default_factory=default_agent_roles)
+
+    @property
+    def runs_dir(self) -> Path:
+        return resolve_path(self.runs_path)
+
+
+@dataclass
 class LoggingConfig:
     log_path: str = "./logs/soulforge.log"
     level: str = "info"
@@ -236,6 +311,7 @@ class AppConfig:
     curator: CuratorConfig
     tasks: TasksConfig
     sessions: SessionsConfig
+    agents: AgentsConfig = field(default_factory=AgentsConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     onboarding: OnboardingConfig = field(default_factory=OnboardingConfig)
@@ -291,6 +367,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         skills=feat_section.get("skills", False),
         curator=feat_section.get("curator", False),
         kanban=feat_section.get("kanban", False),
+        agents=feat_section.get("agents", False),
         streaming=feat_section.get("streaming", True),
         show_sources=feat_section.get("showSources", True),
         tools=feat_section.get("tools", False),
@@ -350,6 +427,52 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         max_saved_sessions=sessions_section.get("maxSavedSessions", 50),
     )
 
+    agents_section = _section(data, "agents")
+    profiles = default_agent_model_profiles()
+    raw_profiles = agents_section.get("modelProfiles", {})
+    if isinstance(raw_profiles, dict):
+        for name, profile_data in raw_profiles.items():
+            if not isinstance(profile_data, dict):
+                continue
+            profiles[str(name)] = AgentModelProfileConfig(
+                chat_model_path=profile_data.get("chatModelPath"),
+                residency=profile_data.get("residency", "swap"),
+                temperature=profile_data.get("temperature"),
+                top_p=profile_data.get("topP"),
+                repeat_penalty=profile_data.get("repeatPenalty"),
+                max_tokens=profile_data.get("maxTokens"),
+                chat_format=profile_data.get("chatFormat"),
+            )
+
+    roles = default_agent_roles()
+    raw_roles = agents_section.get("roles", {})
+    if isinstance(raw_roles, dict):
+        for name, role_data in raw_roles.items():
+            if not isinstance(role_data, dict):
+                continue
+            tools = role_data.get("allowedTools", [])
+            if not isinstance(tools, list):
+                tools = []
+            existing = roles.get(str(name), AgentRoleConfig())
+            roles[str(name)] = AgentRoleConfig(
+                model_profile=role_data.get(
+                    "modelProfile",
+                    existing.model_profile,
+                ),
+                allowed_tools=[str(tool) for tool in tools],
+            )
+
+    agents = AgentsConfig(
+        runs_path=agents_section.get("runsPath", "./app/agents/runs"),
+        max_iterations=agents_section.get("maxIterations", 3),
+        require_approval=agents_section.get("requireApproval", True),
+        strict_json=agents_section.get("strictJson", True),
+        residency_mode=agents_section.get("residencyMode", "hybrid"),
+        default_profile=agents_section.get("defaultProfile", "creator"),
+        model_profiles=profiles,
+        roles=roles,
+    )
+
     logging_section = _section(data, "logging")
     logging_cfg = LoggingConfig(
         log_path=logging_section.get("logPath", "./logs/soulforge.log"),
@@ -385,6 +508,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         curator=curator,
         tasks=tasks,
         sessions=sessions,
+        agents=agents,
         logging=logging_cfg,
         tools=tools_cfg,
         onboarding=onboarding,
@@ -411,6 +535,89 @@ def tools_to_yaml_dict(tools: ToolsConfig) -> dict[str, Any]:
         "shellAllowlist": list(tools.shell_allowlist),
         "autoApproveReadOnly": tools.auto_approve_read_only,
     }
+
+
+def agent_model_profile_to_yaml_dict(
+    profile: AgentModelProfileConfig,
+) -> dict[str, Any]:
+    """Convert an agent model profile to the dict written under ``agents:``."""
+    data: dict[str, Any] = {
+        "chatModelPath": profile.chat_model_path,
+        "residency": profile.residency,
+    }
+    if profile.temperature is not None:
+        data["temperature"] = profile.temperature
+    if profile.top_p is not None:
+        data["topP"] = profile.top_p
+    if profile.repeat_penalty is not None:
+        data["repeatPenalty"] = profile.repeat_penalty
+    if profile.max_tokens is not None:
+        data["maxTokens"] = profile.max_tokens
+    if profile.chat_format is not None:
+        data["chatFormat"] = profile.chat_format
+    return data
+
+
+def agent_role_to_yaml_dict(role: AgentRoleConfig) -> dict[str, Any]:
+    """Convert an agent role mapping to the dict written under ``agents:``."""
+    data: dict[str, Any] = {"modelProfile": role.model_profile}
+    if role.allowed_tools:
+        data["allowedTools"] = list(role.allowed_tools)
+    return data
+
+
+def agents_to_yaml_dict(agents: AgentsConfig) -> dict[str, Any]:
+    """Convert AgentsConfig to the camelCase dict written under ``agents:``."""
+    return {
+        "runsPath": agents.runs_path,
+        "maxIterations": agents.max_iterations,
+        "requireApproval": agents.require_approval,
+        "strictJson": agents.strict_json,
+        "residencyMode": agents.residency_mode,
+        "defaultProfile": agents.default_profile,
+        "modelProfiles": {
+            name: agent_model_profile_to_yaml_dict(profile)
+            for name, profile in agents.model_profiles.items()
+        },
+        "roles": {
+            name: agent_role_to_yaml_dict(role)
+            for name, role in agents.roles.items()
+        },
+    }
+
+
+def save_agents(
+    config: AppConfig,
+    path: str | Path | None = None,
+) -> None:
+    """Persist the current agents section to ``config.yaml`` (atomic write)."""
+    config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    else:
+        data = dict(config.raw) if config.raw else {}
+
+    data["agents"] = agents_to_yaml_dict(config.agents)
+    config.raw = data
+
+    directory = config_path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+
+    fd, temp_path = tempfile.mkstemp(
+        dir=directory,
+        prefix=".config-",
+        suffix=".yaml.tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(data, handle, default_flow_style=False, sort_keys=False)
+        os.replace(temp_path, config_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
 
 
 def save_tools(

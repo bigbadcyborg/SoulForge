@@ -165,6 +165,65 @@ def _handle_model_cli(controller: ChatController, args: str) -> None:
     print(f"Switched to model: {name}")
 
 
+def _handle_models_cli(controller: ChatController, args: str) -> None:
+    stripped = args.strip()
+    if not stripped or stripped.lower() == "list":
+        print(controller.format_models_view())
+        return
+
+    parts = stripped.split(maxsplit=2)
+    sub = parts[0].lower()
+
+    if sub == "help":
+        print(format_help_text("models", controller.config))
+        return
+
+    if sub == "add":
+        _handle_model_cli(controller, stripped)
+        return
+
+    if sub == "chat":
+        chat_parts = stripped.split(maxsplit=1)
+        if len(chat_parts) < 2:
+            print("Usage: /models chat <model>")
+            return
+        try:
+            print("Switching model...")
+            name = controller.switch_chat_model(chat_parts[1])
+        except (OSError, ValueError, FileNotFoundError) as error:
+            print(f"Model switch failed: {error}")
+            return
+        print(f"Switched to model: {name}")
+        return
+
+    if sub in ("role", "rule"):
+        if len(parts) < 3:
+            print("Usage: /models role <role> <model|inherit>")
+            return
+        role_parts = parts[1:]
+        role_name = role_parts[0]
+        model_selection = role_parts[1]
+        try:
+            print(controller.set_agent_role_model(role_name, model_selection))
+        except (OSError, ValueError, FileNotFoundError) as error:
+            print(f"Agent role model update failed: {error}")
+        return
+
+    if sub == "profile":
+        if len(parts) < 3:
+            print("Usage: /models profile <profile> <model|inherit>")
+            return
+        profile_name = parts[1]
+        model_selection = parts[2]
+        try:
+            print(controller.set_agent_profile_model(profile_name, model_selection))
+        except (OSError, ValueError, FileNotFoundError) as error:
+            print(f"Agent profile model update failed: {error}")
+        return
+
+    print("Usage: /models | /models chat <model> | /models role <role> <model|inherit>")
+
+
 def _handle_features_cli(controller: ChatController, args: str) -> None:
     if not args or args.lower() == "list":
         print("Feature flags:")
@@ -580,6 +639,65 @@ def _handle_session_summary_cli(controller: ChatController) -> None:
         print(result.summary)
 
 
+def _handle_agents_cli(controller: ChatController, args: str) -> None:
+    stripped = args.strip()
+    if not stripped:
+        if not controller.features.is_enabled("agents"):
+            print("Agents are disabled. Run /agents on to enable.")
+            print(controller.get_agent_model_status())
+            return
+        print(controller.get_agents_status().message)
+        print()
+        print(controller.get_agent_model_status())
+        return
+
+    parts = stripped.split(maxsplit=1)
+    sub = parts[0].lower()
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if sub == "help":
+        print(format_help_text("agents", controller.config))
+        return
+
+    if sub in ("on", "off"):
+        controller.set_feature("agents", sub == "on")
+        print(f"Agents set to {sub}. (saved to config.yaml)")
+        return
+
+    if sub == "run":
+        result = controller.run_agent_workflow(rest)
+        print(result.message)
+        return
+
+    if sub == "status":
+        print(controller.get_agents_status(rest).message)
+        return
+
+    if sub == "edit":
+        edit_parts = rest.split(maxsplit=1)
+        if not edit_parts:
+            print("Usage: /agents edit <task_id> [new input spec]")
+            return
+        task_id = edit_parts[0]
+        new_spec = edit_parts[1] if len(edit_parts) > 1 else ""
+        print(controller.edit_agent_task(task_id, new_spec).message)
+        return
+
+    if sub == "approve":
+        print(controller.approve_agent_checkpoint(rest).message)
+        return
+
+    if sub == "reject":
+        print(controller.reject_agent_checkpoint(rest).message)
+        return
+
+    if sub == "cancel":
+        print(controller.cancel_agent_run(rest).message)
+        return
+
+    print("Usage: /agents | /agents on|off | /agents run <goal> | /agents status [run_id]")
+
+
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
     """Handle CLI commands. Return True if should continue, False if should exit."""
     parts = cmd.split(maxsplit=1)
@@ -616,6 +734,8 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         _handle_features_cli(controller, args)
     elif command == "/model":
         _handle_model_cli(controller, args)
+    elif command == "/models":
+        _handle_models_cli(controller, args)
     elif command == "/ingest":
         _handle_ingest_cli(controller)
     elif command == "/sources":
@@ -685,6 +805,8 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         _handle_task_accept_cli(controller, args)
     elif command == "/task-reject":
         _handle_task_reject_cli(controller, args)
+    elif command == "/agents":
+        _handle_agents_cli(controller, args)
     elif command == "/session-list":
         _handle_session_list_cli(controller)
     elif command == "/session-save":

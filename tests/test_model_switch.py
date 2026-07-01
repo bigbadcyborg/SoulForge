@@ -2,21 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 import yaml
+from textual.app import App
+from textual.widgets import RadioButton
 
 from app.core import model_catalog
 from app.core.chat_controller import ChatController
-from app.core.config import AppConfig, ModelConfig, load_config, save_chat_model
+from app.core.config import (
+    AgentModelProfileConfig,
+    AppConfig,
+    ModelConfig,
+    load_config,
+    save_agents,
+    save_chat_model,
+)
 from app.core.model_catalog import (
     import_chat_model,
     list_available_chat_models,
     resolve_chat_model_selection,
     validate_gguf_source,
 )
+from app.tui.widgets import ModelSelectionModal
 
 
 def _write_config(tmp_path: Path, **overrides) -> Path:
@@ -153,6 +164,21 @@ def test_save_chat_model_updates_yaml(model_env) -> None:
     assert saved["model"]["chatModelPath"] == "./models/new-chat.gguf"
 
 
+def test_save_agents_updates_yaml(model_env) -> None:
+    _, _, config, config_path = model_env
+    config.agents.model_profiles["critic"] = AgentModelProfileConfig(
+        chat_model_path="./models/critic.gguf",
+        residency="resident",
+    )
+    config.agents.roles["critic"].model_profile = "critic"
+
+    save_agents(config, config_path)
+
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["agents"]["modelProfiles"]["critic"]["chatModelPath"] == "./models/critic.gguf"
+    assert saved["agents"]["roles"]["critic"]["modelProfile"] == "critic"
+
+
 def test_switch_chat_model_updates_config_and_runtime(model_env, monkeypatch) -> None:
     _, models_dir, config, config_path = model_env
     (models_dir / "other.gguf").write_bytes(b"x")
@@ -186,6 +212,49 @@ def test_switch_chat_model_rolls_back_on_failure(model_env, monkeypatch) -> None
     assert controller.runtime.load_chat_model.call_count == 2
 
 
+def test_set_agent_role_model_isolates_shared_profile(model_env, monkeypatch) -> None:
+    _, models_dir, config, _ = model_env
+    (models_dir / "critic.gguf").write_bytes(b"x")
+    controller = ChatController(config)
+    controller.runtime = MagicMock()
+    monkeypatch.setattr(
+        "app.core.chat_controller.save_agents",
+        lambda cfg, path=None: None,
+    )
+
+    message = controller.set_agent_role_model("critic", "critic.gguf")
+
+    assert "Role 'critic'" in message
+    assert config.agents.roles["critic"].model_profile == "critic"
+    assert config.agents.roles["executor"].model_profile == "critic_executor"
+    assert config.agents.model_profiles["critic"].chat_model_path.endswith("critic.gguf")
+    assert config.agents.model_profiles["critic"].residency == "resident"
+    controller.runtime.unload_chat_profile.assert_called_once_with("critic")
+
+
+def test_set_agent_role_model_can_inherit_chat_model(model_env, monkeypatch) -> None:
+    _, models_dir, config, _ = model_env
+    (models_dir / "critic.gguf").write_bytes(b"x")
+    config.agents.model_profiles["critic"] = AgentModelProfileConfig(
+        chat_model_path="models/critic.gguf",
+        residency="resident",
+    )
+    config.agents.roles["critic"].model_profile = "critic"
+    controller = ChatController(config)
+    controller.runtime = MagicMock()
+    monkeypatch.setattr(
+        "app.core.chat_controller.save_agents",
+        lambda cfg, path=None: None,
+    )
+
+    message = controller.set_agent_role_model("critic", "inherit")
+
+    assert "inherits /model" in message
+    assert config.agents.roles["critic"].model_profile == "critic"
+    assert config.agents.model_profiles["critic"].chat_model_path is None
+    controller.runtime.unload_chat_profile.assert_called_once_with("critic")
+
+
 def test_import_chat_model_with_switch_after(model_env, monkeypatch) -> None:
     tmp_path, models_dir, config, _ = model_env
     source = tmp_path / "fresh.gguf"
@@ -203,3 +272,35 @@ def test_import_chat_model_with_switch_after(model_env, monkeypatch) -> None:
     assert "Switched to fresh.gguf" in message
     assert (models_dir / "fresh.gguf").exists()
     controller.runtime.unload_chat_model.assert_called_once()
+
+
+def test_model_selection_modal_returns_model_name_for_selection() -> None:
+    class ModelSelectionHarness(App):
+        def __init__(self, select_index: int | None = None) -> None:
+            super().__init__()
+            self.select_index = select_index
+            self.result = None
+
+        def on_mount(self) -> None:
+            modal = ModelSelectionModal(["alpha.gguf", "beta.gguf"], "alpha.gguf")
+            self.push_screen(modal, self._store_result)
+
+        def _store_result(self, result) -> None:
+            self.result = result
+            self.exit()
+
+    async def run_modal(select_index: int | None = None) -> str | None:
+        app = ModelSelectionHarness(select_index)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            if select_index is not None:
+                modal = app.screen_stack[-1]
+                buttons = list(modal.query(RadioButton))
+                buttons[select_index].value = True
+                await pilot.pause()
+            await pilot.click("#switch-model-button")
+            await pilot.pause()
+        return app.result
+
+    assert asyncio.run(run_modal()) == "alpha.gguf"
+    assert asyncio.run(run_modal(1)) == "beta.gguf"

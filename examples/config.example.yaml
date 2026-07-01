@@ -1,5 +1,5 @@
 model:
-  # chatModelPath can also be changed at runtime with /model
+  # chatModelPath can also be changed at runtime with /model or /models chat
   chatModelPath: ./models/NemoMix-Unleashed-12B-Q4_K_M.gguf
   embeddingModelPath: ./models/embedding-model.gguf
   contextSize: 8192
@@ -24,6 +24,7 @@ features:
   skills: false
   curator: false
   kanban: false
+  agents: false
   streaming: true
   showSources: true
   tools: false
@@ -67,6 +68,45 @@ tasks:
 sessions:
   storePath: ./app/sessions
   maxSavedSessions: 50
+
+agents:
+  # Agent role/profile models can be changed at runtime with /models.
+  # Example: /models role critic Llama-3.1-8B
+  runsPath: ./app/agents/runs
+  maxIterations: 3
+  requireApproval: true
+  strictJson: true
+  residencyMode: hybrid
+  defaultProfile: creator
+  modelProfiles:
+    orchestrator:
+      chatModelPath:
+      residency: swap
+      temperature: 0.2
+      maxTokens: 1400
+    creator:
+      chatModelPath:
+      residency: resident
+      temperature: 0.35
+      maxTokens: 1800
+    critic_executor:
+      chatModelPath:
+      residency: resident
+      temperature: 0.1
+      maxTokens: 1000
+  roles:
+    orchestrator:
+      modelProfile: orchestrator
+    researcher:
+      modelProfile: critic_executor
+    creator:
+      modelProfile: creator
+    executor:
+      modelProfile: critic_executor
+    critic:
+      modelProfile: critic_executor
+    synthesizer:
+      modelProfile: creator
 
 logging:
   logPath: ./logs/soulforge.log

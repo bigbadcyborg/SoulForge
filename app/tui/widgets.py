@@ -253,6 +253,7 @@ class ModelSelectionModal(ModalScreen):
         super().__init__()
         self.models = models
         self.current = current
+        self.selected_model = current if current in models else (models[0] if models else "")
 
     def compose(self):
         with Vertical(id="model-modal-container"):
@@ -262,7 +263,7 @@ class ModelSelectionModal(ModalScreen):
                     with RadioSet(id="model-radio-set"):
                         for name in self.models:
                             label = f"{name} (current)" if name == self.current else name
-                            yield RadioButton(label, value=name)
+                            yield RadioButton(label, value=name == self.current, name=name)
             else:
                 yield Static(
                     "No chat models in ./models/. Use Add model to import a .gguf file.",
@@ -286,8 +287,15 @@ class ModelSelectionModal(ModalScreen):
                 return
             radio_set = self.query_one("#model-radio-set", RadioSet)
             pressed = radio_set.pressed_button
-            selected = pressed.value if pressed is not None else self.current
-            self.dismiss(selected)
+            if pressed is not None and pressed.name:
+                self.selected_model = pressed.name
+            self.dismiss(self.selected_model)
+
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        if event.radio_set.id != "model-radio-set":
+            return
+        if event.pressed.name:
+            self.selected_model = event.pressed.name
 
 
 class AddModelModal(ModalScreen):
@@ -1208,6 +1216,55 @@ class SessionSaveModal(ModalScreen):
             self.dismiss(title or self.default_title)
 
 
+class AgentsStatusModal(ModalScreen):
+    """Modal for viewing agent run status and model profile residency."""
+
+    def __init__(self, status_text: str, model_text: str = "") -> None:
+        super().__init__()
+        self.status_text = status_text
+        self.model_text = model_text
+
+    def compose(self):
+        body = self.status_text
+        if self.model_text:
+            body = f"{body}\n\n--- Model Profiles ---\n{self.model_text}"
+        with Vertical(id="agents-status-container"):
+            yield Label("Agent Workflow Status")
+            with VerticalScroll(id="agents-status-scroll"):
+                yield Static(body, id="agents-status-content")
+            with Container(id="button-container"):
+                yield Button("Close", id="close-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-button":
+            self.dismiss(None)
+
+
+class AgentTaskEditModal(ModalScreen):
+    """Modal for replacing a blocked agent task input spec."""
+
+    def __init__(self, task_id: str, current_text: str = "") -> None:
+        super().__init__()
+        self.task_id = task_id
+        self.current_text = current_text
+
+    def compose(self):
+        with Vertical(id="agent-task-edit-container"):
+            yield Label(f"Edit Agent Task: {self.task_id}")
+            yield Label("Replacement input spec:")
+            yield TextArea(self.current_text, id="agent-task-edit-text")
+            with Container(id="button-container"):
+                yield Button("Save", id="save-button", variant="success")
+                yield Button("Cancel", id="cancel-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel-button":
+            self.dismiss(None)
+        elif event.button.id == "save-button":
+            content = self.query_one("#agent-task-edit-text", TextArea).text.strip()
+            self.dismiss((self.task_id, content))
+
+
 class TutorialFinished(Message):
     """Posted when the user finishes or skips the tutorial panel."""
 
@@ -1338,4 +1395,3 @@ class TutorialWizardPanel(Vertical):
         prev_btn.disabled = self.step_index == 0
         next_btn.disabled = self.step_index >= len(TUTORIAL_STEPS) - 1
         finish_btn.disabled = self.step_index < len(TUTORIAL_STEPS) - 1
-

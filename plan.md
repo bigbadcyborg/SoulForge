@@ -1114,6 +1114,34 @@ Make setup and usage clean.
 
 ---
 
+## Iteration 15: Multi-Agent Orchestration
+
+### Objective
+
+Add an opt-in local multi-agent workflow where an Orchestrator model emits a strict-JSON task graph and delegates work to specialized Researcher, Creator, Executor, Critic, and Synthesizer roles.
+
+### Deliverables
+
+* Named model profiles with resident/swap residency hints
+* `features.agents` and `agents:` config
+* Agent run persistence under `app/agents/runs/`
+* Strict JSON envelope parsing and one repair attempt
+* `parent_task_id` and `context_pruning` for scoped worker context
+* `/agents` CLI and TUI commands
+* Approval checkpoints for risky tool requests
+
+### Acceptance Criteria
+
+* `/agents` remains opt-in and normal chat behavior is unchanged.
+* 32B Creator and 8B Critic/Executor profiles can be resident when VRAM allows.
+* The 70B Orchestrator profile can be swapped in for graph planning, with UI messaging that it may spill into system memory and generate slowly.
+* If resident loading fails, runtime falls back to sequential hot-swapping.
+* Invalid agent JSON gets one repair attempt, then blocks the task.
+* `/agents edit <task_id>` allows manual task input-spec correction.
+* Risky tool requests pause as checkpoints until approved or rejected.
+
+---
+
 ## 9. Suggested Commands
 
 ### Core Commands
@@ -1185,6 +1213,20 @@ Make setup and usage clean.
 /task-move
 /task-done
 /task-delete
+```
+
+### Agent Commands
+
+```text
+/agents
+/agents on
+/agents off
+/agents run <goal>
+/agents status [run_id]
+/agents edit <task_id>
+/agents approve <checkpoint_id>
+/agents reject <checkpoint_id>
+/agents cancel [run_id]
 ```
 
 ---
@@ -1385,6 +1427,10 @@ Kanban dashboard.
 ### v1.3
 
 Controlled tool harness.
+
+### v1.4
+
+Opt-in multi-agent orchestration with local model profiles.
 
 ---
 

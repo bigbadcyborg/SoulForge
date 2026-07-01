@@ -49,21 +49,31 @@ sudo apt install -y \
   tesseract-ocr \
   poppler-utils
 
-if [[ ! -d ".venv-wsl" ]]; then
+VENV_DIR="$PROJECT_DIR/.venv-wsl"
+PYTHON_BIN="$VENV_DIR/bin/python"
+
+if [[ ! -d "$VENV_DIR" ]]; then
   echo ">>> Creating Python virtual environment (.venv-wsl)..."
-  python3 -m venv .venv-wsl
+  python3 -m venv "$VENV_DIR"
 else
   echo ">>> Using existing virtual environment (.venv-wsl)"
 fi
 
-# shellcheck disable=SC1091
-source .venv-wsl/bin/activate
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "ERROR: Python executable not found at $PYTHON_BIN"
+  echo "Remove .venv-wsl and rerun setup if the virtual environment is corrupted."
+  exit 1
+fi
+
+export VIRTUAL_ENV="$VENV_DIR"
+export PATH="$VENV_DIR/bin:$PATH"
+hash -r 2>/dev/null || true
 
 echo ">>> Upgrading pip..."
-python -m pip install --upgrade pip setuptools wheel
+"$PYTHON_BIN" -m pip install --upgrade pip setuptools wheel
 
 echo ">>> Installing Python dependencies from requirements.txt..."
-pip install -r requirements.txt
+"$PYTHON_BIN" -m pip install -r requirements.txt
 
 if [[ "$WITH_CUDA" -eq 1 ]]; then
   echo ">>> Building llama-cpp-python with CUDA support..."
@@ -77,16 +87,16 @@ if [[ "$WITH_CUDA" -eq 1 ]]; then
   export PATH="$CUDA_HOME/bin:$PATH"
   export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 
-  pip uninstall -y llama-cpp-python || true
+  "$PYTHON_BIN" -m pip uninstall -y llama-cpp-python || true
 
   CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_COMPILER=$CUDA_HOME/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=120 -DGGML_NATIVE=OFF"
   export CMAKE_ARGS
   export FORCE_CMAKE=1
 
-  pip install --no-cache-dir --force-reinstall --no-binary llama-cpp-python llama-cpp-python
+  "$PYTHON_BIN" -m pip install --no-cache-dir --force-reinstall --no-binary llama-cpp-python llama-cpp-python
 
   echo ">>> Verifying CUDA linkage..."
-  LLAMA_SO="$(python -c "import llama_cpp, pathlib; p=pathlib.Path(llama_cpp.__file__).parent/'lib'/'libllama.so'; print(p)" 2>/dev/null || true)"
+  LLAMA_SO="$("$PYTHON_BIN" -c "import llama_cpp, pathlib; p=pathlib.Path(llama_cpp.__file__).parent/'lib'/'libllama.so'; print(p)" 2>/dev/null || true)"
   if [[ -n "$LLAMA_SO" && -f "$LLAMA_SO" ]]; then
     ldd "$LLAMA_SO" | grep -i cuda || echo "WARNING: CUDA libraries not detected in libllama.so"
   fi

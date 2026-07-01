@@ -1,10 +1,10 @@
 model:
-  chatModelPath: ./models/NemoMix-Unleashed-12B-Q4_K_M.gguf
+  chatModelPath: models/NemoMix-Unleashed-12B-Q4_K_M.gguf
   embeddingModelPath: ./models/embedding-model.gguf
   contextSize: 8192
   gpuLayers: -1
   threads: 8
-  chatFormat: mistral-instruct
+  chatFormat: chatml
 generation:
   temperature: 0.75
   topP: 0.95
@@ -21,6 +21,7 @@ features:
   skills: true
   curator: true
   kanban: false
+  agents: false
   streaming: true
   showSources: true
   tools: false
@@ -58,6 +59,42 @@ tasks:
 sessions:
   storePath: ./app/sessions
   maxSavedSessions: 50
+agents:
+  runsPath: ./app/agents/runs
+  maxIterations: 3
+  requireApproval: true
+  strictJson: true
+  residencyMode: hybrid
+  defaultProfile: creator
+  modelProfiles:
+    orchestrator:
+      chatModelPath:
+      residency: swap
+      temperature: 0.2
+      maxTokens: 1400
+    creator:
+      chatModelPath:
+      residency: resident
+      temperature: 0.35
+      maxTokens: 1800
+    critic_executor:
+      chatModelPath:
+      residency: resident
+      temperature: 0.1
+      maxTokens: 1000
+  roles:
+    orchestrator:
+      modelProfile: orchestrator
+    researcher:
+      modelProfile: critic_executor
+    creator:
+      modelProfile: creator
+    executor:
+      modelProfile: critic_executor
+    critic:
+      modelProfile: critic_executor
+    synthesizer:
+      modelProfile: creator
 logging:
   logPath: ./logs/soulforge.log
   level: info

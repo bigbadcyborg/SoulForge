@@ -15,6 +15,7 @@ This project is designed to run locally (Windows/WSL) with CUDA acceleration for
 * **Document Ingestion**: Index `docs/` into ChromaDB with `/ingest` or `python ingestDocs.py` (text + PDF/OCR).
 * **Source Viewer**: Inspect retrieved chunks from the last question with `/sources`.
 * **Tools Workshop**: Open `/tools` (or `/tool`) in TUI to add shell allowlist entries and run manual tool tests with visible output.
+* **Opt-in Multi-Agent Workflows**: Use `/agents run <goal>` to let a local Orchestrator create a strict-JSON task graph and delegate scoped work to Researcher, Creator, Executor, Critic, and Synthesizer roles.
 * **WSL 2 & CUDA support**: Optimized for NVIDIA GPUs (including Blackwell/RTX 5090) within WSL Ubuntu.
 * **Persona Hot-Reload**: Update `SOUL.md` and reload the character instantly with `/reload-soul`.
 * **Compute Indicator**: Status bar shows **GPU** or **CPU** after the model loads.
@@ -35,6 +36,13 @@ Type `/help` in the TUI or CLI for the full list with descriptions. Key commands
 * `/tools add-shell <command>`: Add a command prefix to `tools.shellAllowlist`.
 * `/tools allowlist`: Show current shell allowlist entries.
 * `/tools-log`: View recent tool execution audit log entries.
+* `/models`: Show chat model and agent role/profile model routing.
+* `/models role <role> <model|inherit>`: Set one agent role's model without changing sibling roles.
+* `/agents on` / `/agents off`: Enable or disable opt-in multi-agent workflows.
+* `/agents run <goal>`: Run the Orchestrator/worker pipeline for a goal.
+* `/agents status [run_id]`: Inspect agent tasks, statuses, and checkpoints.
+* `/agents edit <task_id> [new spec]`: View or replace a stuck task input spec.
+* `/agents approve <checkpoint_id>` / `/agents reject <checkpoint_id>`: Resolve pending agent tool checkpoints.
 * `/status`: Show model, active features, and RAG index stats.
 * `/reload-soul`: Refresh persona from `SOUL.md` without restarting.
 * `/help`: Show all commands with descriptions.
@@ -381,6 +389,45 @@ In TUI:
 * Run `/tools` (or `/tool`) to open the workshop.
 * Use **Add Shell Command** to append a command prefix.
 * Use **Test Tool** to run a manual test and inspect output.
+
+## Multi-Agent Workflows
+
+The optional agent workflow is disabled by default. Enable it with:
+
+```text
+/agents on
+```
+
+Start a run with:
+
+```text
+/agents run Build a small CLI utility and review it for edge cases
+```
+
+SoulForge stores agent runs under `app/agents/runs/` and requires strict JSON envelopes between roles. Each task includes `parent_task_id` and `context_pruning` so workers receive the root goal, ancestors, dependencies, and relevant artifacts without unrelated sibling-task chatter.
+
+The recommended RTX 5090 / 32GB VRAM layout is:
+
+```text
+orchestrator: 70B profile, residency swap
+creator:      32B coder profile, residency resident
+critic/executor: 8B profile, residency resident
+```
+
+Set these routes at runtime with `/models`:
+
+```text
+/models role orchestrator Qwen2.5-72B
+/models role creator Qwen2.5-Coder-32B
+/models role critic Llama-3.1-8B
+/models role executor Llama-3.1-8B
+```
+
+Use `/models role <role> inherit` to make a role follow the normal `/model`
+chat model. Use `/models profile <profile> <model>` only when you want every
+role mapped to that shared profile to change together.
+
+The 70B Orchestrator profile is expected to exceed the 32GB VRAM budget and spill into system memory. Planning phases can therefore generate more slowly than worker phases. If resident 32B + 8B loading fails, SoulForge falls back to sequential hot-swapping.
 
 ## Doctor script
 
