@@ -271,6 +271,21 @@ class SoulForgeApp(App):
         self.call_from_thread(self._agent_done)
 
     @work(thread=True, exclusive=True, group="model")
+    def _resume_agent_workflow(self, run_id: str) -> None:
+        try:
+            result = self.controller.resume_agent_run(run_id)
+        except Exception as error:  # noqa: BLE001
+            self.call_from_thread(
+                self._write_message,
+                "system",
+                f"Agent resume failed: {error}",
+            )
+            self.call_from_thread(self._agent_done)
+            return
+        self.call_from_thread(self._write_message, "system", result.message)
+        self.call_from_thread(self._agent_done)
+
+    @work(thread=True, exclusive=True, group="model")
     def _resolve_agent_checkpoint(self, checkpoint_id: str, approve: bool) -> None:
         try:
             result = (
@@ -688,6 +703,15 @@ class SoulForgeApp(App):
             self.status_bar.set_state("Running agents...")
             self.prompt.disabled = True
             self._run_agent_workflow(rest)
+            return
+
+        if sub == "resume":
+            if not self.models_ready:
+                self._write_message("system", "Model is still loading, please wait.")
+                return
+            self.status_bar.set_state("Resuming agents...")
+            self.prompt.disabled = True
+            self._resume_agent_workflow(rest)
             return
 
         if sub == "status":

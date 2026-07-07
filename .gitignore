@@ -31,3 +31,5 @@ logs/tool_calls.jsonl
 Thumbs.db
 .vscode/
 .idea/
+# Audit log (contains chat transcripts)
+logs/audit.jsonl

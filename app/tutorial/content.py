@@ -198,6 +198,7 @@ TUTORIAL_STEPS: tuple[TutorialStep, ...] = (
             "  /agents edit <task_id> [spec]   - view or replace task input context\n"
             "  /agents approve <checkpoint_id> - execute a pending tool checkpoint\n"
             "  /agents reject <checkpoint_id>  - reject a pending tool checkpoint\n"
+            "  /agents resume [run_id]         - continue after checkpoints/edits\n"
             "  /agents cancel [run_id]         - cancel a run\n\n"
             "Model routing:\n"
             "  /models                         - view chat + agent role models\n"

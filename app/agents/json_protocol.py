@@ -48,6 +48,20 @@ def _string_list(value: Any, field_name: str) -> list[str]:
     return [str(item) for item in value]
 
 
+def _int_value(value: Any, default: int, field_name: str) -> int:
+    """Coerce a model-supplied value to int, raising AgentProtocolError on junk.
+
+    A plain ValueError here would bypass the JSON repair path, which only
+    catches AgentProtocolError.
+    """
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError) as error:
+        raise AgentProtocolError(f"{field_name} must be an integer.") from error
+
+
 def _dict_list(value: Any, field_name: str) -> list[dict[str, Any]]:
     if value is None:
         return []
@@ -70,7 +84,7 @@ def parse_agent_envelope(
 ) -> AgentJsonEnvelope:
     data = parse_json_object(text)
 
-    schema_version = int(data.get("schema_version", 0) or 0)
+    schema_version = _int_value(data.get("schema_version"), 0, "schema_version")
     if schema_version != 1:
         raise AgentProtocolError("schema_version must be 1.")
 
@@ -155,7 +169,8 @@ def task_from_json(data: dict[str, Any], *, default_max_attempts: int) -> AgentT
         parent_task_id=parent_task_id,
         context_pruning=ContextPruning.from_dict(data.get("context_pruning")),
         input_spec=str(data.get("input_spec", "")),
-        max_attempts=int(data.get("max_attempts", default_max_attempts) or default_max_attempts),
+        max_attempts=_int_value(data.get("max_attempts"), default_max_attempts, "max_attempts")
+        or default_max_attempts,
     )
 
 

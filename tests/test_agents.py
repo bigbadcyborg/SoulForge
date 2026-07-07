@@ -16,7 +16,7 @@ from app.agents.json_protocol import (
     tasks_from_planner_envelope,
 )
 from app.agents.manager import AgentManager
-from app.agents.models import AgentRun, AgentTask, ContextPruning
+from app.agents.models import AgentCheckpoint, AgentRun, AgentTask, ContextPruning
 from app.agents.store import AgentRunStore
 from app.core.chat_controller import ChatController
 from app.core.config import load_config
@@ -282,3 +282,77 @@ def test_agent_checkpoint_requires_approval(tmp_path) -> None:
     manager.store.save(run)
     approved = manager.approve_checkpoint("chk1")
     assert approved.success is True
+
+
+def test_resume_run_after_checkpoint_completes(tmp_path) -> None:
+    config = load_config(_write_agent_config(tmp_path, tools=True))
+    runtime = MagicMock()
+    runtime.warm_resident_profiles.return_value = []
+
+    run = AgentRun(run_id="run_resume", goal="Use tool", status="paused")
+    task = AgentTask(
+        id="exec",
+        role="executor",
+        title="Exec",
+        instructions="Write",
+        status="paused",
+        attempts=1,
+    )
+    run.tasks = [task]
+    run.checkpoints.append(
+        AgentCheckpoint(
+            checkpoint_id="chk_done",
+            run_id="run_resume",
+            task_id="exec",
+            tool_call={"name": "write_file", "args": {}},
+            status="executed",
+            result={"output": "wrote it"},
+        )
+    )
+
+    def completion(profile, messages, stream=False):
+        content = messages[-1]["content"]
+        if "task_id 'final'" in content:
+            return _envelope(
+                role="synthesizer",
+                run_id="run_resume",
+                task_id="final",
+                summary="done",
+            )
+        if "task_id 'critic'" in content:
+            return _envelope(role="critic", run_id="run_resume", task_id="critic")
+        # The resumed executor task must see its approved tool result.
+        assert "wrote it" in content
+        return _envelope(role="executor", run_id="run_resume", task_id="exec")
+
+    runtime.create_chat_completion_for_profile.side_effect = completion
+    manager = AgentManager(config, runtime)
+    manager.active_run_id = run.run_id
+    manager.store.save(run)
+
+    result = manager.resume_run()
+    assert result.success is True
+    assert result.run is not None
+    assert result.run.status == "completed"
+    assert result.run.final_answer == "done"
+
+
+def test_resume_run_requires_resolved_checkpoints(tmp_path) -> None:
+    config = load_config(_write_agent_config(tmp_path, tools=True))
+    runtime = MagicMock()
+    run = AgentRun(run_id="run_wait", goal="Use tool", status="paused")
+    run.checkpoints.append(
+        AgentCheckpoint(
+            checkpoint_id="chk_open",
+            run_id="run_wait",
+            task_id="exec",
+            tool_call={"name": "write_file", "args": {}},
+        )
+    )
+    manager = AgentManager(config, runtime)
+    manager.active_run_id = run.run_id
+    manager.store.save(run)
+
+    result = manager.resume_run()
+    assert result.success is False
+    assert "chk_open" in result.message

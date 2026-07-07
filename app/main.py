@@ -669,6 +669,10 @@ def _handle_agents_cli(controller: ChatController, args: str) -> None:
         print(result.message)
         return
 
+    if sub == "resume":
+        print(controller.resume_agent_run(rest).message)
+        return
+
     if sub == "status":
         print(controller.get_agents_status(rest).message)
         return
@@ -695,7 +699,10 @@ def _handle_agents_cli(controller: ChatController, args: str) -> None:
         print(controller.cancel_agent_run(rest).message)
         return
 
-    print("Usage: /agents | /agents on|off | /agents run <goal> | /agents status [run_id]")
+    print(
+        "Usage: /agents | /agents on|off | /agents run <goal> | "
+        "/agents resume [run_id] | /agents status [run_id]"
+    )
 
 
 def _handle_cli_command(controller: ChatController, cmd: str) -> bool:

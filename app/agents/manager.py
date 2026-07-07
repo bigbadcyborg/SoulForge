@@ -14,6 +14,7 @@ from app.agents.json_protocol import (
 )
 from app.agents.models import (
     AgentCheckpoint,
+    AgentJsonEnvelope,
     AgentRun,
     AgentTask,
     ContextPruning,
@@ -69,7 +70,7 @@ class AgentManager:
         self.active_run_id = run.run_id
         self.store.save(run)
 
-        warnings = self.runtime.warm_resident_profiles()
+        warnings: list[str] = []
         try:
             plan = self._run_envelope(
                 role="orchestrator",
@@ -86,6 +87,10 @@ class AgentManager:
                 default_max_attempts=self.config.agents.max_iterations,
             )
             self.store.save(run)
+            # Warm residents only after planning: the orchestrator's swap
+            # profile evicts every other loaded profile, so warming earlier
+            # would load the worker models just to throw them away.
+            warnings = self.runtime.warm_resident_profiles()
             self._execute_run(run)
         except Exception as error:  # noqa: BLE001
             run.status = "blocked"
@@ -98,6 +103,52 @@ class AgentManager:
                 run,
             )
 
+        return self._run_outcome(run, warnings)
+
+    def resume_run(self, run_id: str = "") -> AgentActionResult:
+        """Continue a paused run after checkpoints are resolved or a task is edited."""
+        run = self._resolve_run(run_id)
+        if run is None:
+            return AgentActionResult(False, "No agent run found.")
+        if run.status not in ("paused", "blocked"):
+            return AgentActionResult(
+                False,
+                f"Run {run.run_id} is {run.status}; only paused or blocked runs can be resumed.",
+                run,
+            )
+        pending = [item for item in run.checkpoints if item.status == "pending"]
+        if pending:
+            ids = ", ".join(item.checkpoint_id for item in pending)
+            return AgentActionResult(
+                False,
+                f"Resolve pending checkpoint(s) first: {ids}",
+                run,
+            )
+
+        self.active_run_id = run.run_id
+        for task in run.tasks:
+            if task.status in ("paused", "blocked", "revising", "running"):
+                task.status = "pending"
+                task.attempts = 0
+                task.updated_at = utc_now()
+
+        warnings = self.runtime.warm_resident_profiles()
+        try:
+            self._execute_run(run)
+        except Exception as error:  # noqa: BLE001
+            run.status = "blocked"
+            run.results.append(self._error_result(str(error)))
+            self.store.save(run)
+            warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
+            return AgentActionResult(
+                False,
+                f"Agent run blocked while resuming: {error}{warning_text}",
+                run,
+            )
+
+        return self._run_outcome(run, warnings)
+
+    def _run_outcome(self, run: AgentRun, warnings: list[str]) -> AgentActionResult:
         warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
         if run.status == "completed":
             return AgentActionResult(
@@ -133,7 +184,7 @@ class AgentManager:
         run = self._resolve_run("")
         if run is None:
             return AgentActionResult(False, "No agent run found.")
-        task = self._task_by_id(run, task_id)
+        task = self._task_by_id(run, task_id, allow_prefix=True)
         if task is None:
             return AgentActionResult(False, f"Task '{task_id}' not found.", run)
         if not new_spec.strip():
@@ -151,7 +202,7 @@ class AgentManager:
         self.store.save(run)
         return AgentActionResult(
             True,
-            f"Updated task {task.id}. Run is paused; use /agents run <goal> for a fresh run.",
+            f"Updated task {task.id}. Run is paused; use /agents resume to continue with the new spec.",
             run,
         )
 
@@ -162,7 +213,7 @@ class AgentManager:
         run = self._resolve_run("")
         if run is None:
             return AgentActionResult(False, "No agent run found.")
-        task = self._task_by_id(run, task_id)
+        task = self._task_by_id(run, task_id, allow_prefix=True)
         if task is None:
             return AgentActionResult(False, f"Task '{task_id}' not found.", run)
         return AgentActionResult(True, task.input_spec, run)
@@ -255,6 +306,9 @@ class AgentManager:
                 self.store.save(run)
                 return
             target.status = "pending"
+            # A critic-requested revision grants fresh attempts; otherwise a
+            # task that passed on its final attempt would re-block instantly.
+            target.attempts = 0
             if critic.summary:
                 target.input_spec = (
                     target.input_spec + "\n\nCritic feedback:\n" + critic.summary
@@ -322,15 +376,34 @@ class AgentManager:
                 expected_role=role,
             )
         except AgentProtocolError as error:
-            if not self.config.agents.strict_json:
-                raise
             repair_raw = self._completion_text(profile_name, repair_prompt(raw, str(error)))
-            return parse_agent_envelope(
-                repair_raw,
-                expected_run_id=run.run_id,
-                expected_task_id=task_id,
-                expected_role=role,
-            )
+            try:
+                return parse_agent_envelope(
+                    repair_raw,
+                    expected_run_id=run.run_id,
+                    expected_task_id=task_id,
+                    expected_role=role,
+                )
+            except AgentProtocolError:
+                if self.config.agents.strict_json:
+                    raise
+                # Lenient mode: accept the raw text as the task result rather
+                # than blocking the run on a schema failure.
+                text = (repair_raw or raw).strip()
+                return AgentJsonEnvelope(
+                    schema_version=1,
+                    role=role,
+                    run_id=run.run_id,
+                    task_id=task_id,
+                    parent_task_id=None,
+                    context_pruning=ContextPruning(),
+                    status="pass",
+                    summary=text,
+                    errors=[
+                        "Response was not valid envelope JSON; "
+                        "accepted as plain text because agents.strictJson is false."
+                    ],
+                )
 
     def _completion_text(self, profile_name: str, messages: list[dict[str, str]]) -> str:
         response = self.runtime.create_chat_completion_for_profile(
@@ -388,54 +461,92 @@ class AgentManager:
                 result.errors.append(tool_result.error or "Tool execution failed.")
         return paused
 
+    def _find_checkpoint(
+        self, checkpoint_id: str
+    ) -> tuple[AgentRun, AgentCheckpoint] | str | None:
+        """Locate a checkpoint by exact id, or unique prefix as a fallback.
+
+        Returns the (run, checkpoint) pair, an error message for ambiguous
+        prefixes, or None when nothing matches.
+        """
+        runs = self.store.list_runs()
+        for run in runs:
+            for checkpoint in run.checkpoints:
+                if checkpoint.checkpoint_id == checkpoint_id:
+                    return run, checkpoint
+        matches = [
+            (run, checkpoint)
+            for run in runs
+            for checkpoint in run.checkpoints
+            if checkpoint.checkpoint_id.startswith(checkpoint_id)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            ids = ", ".join(checkpoint.checkpoint_id for _, checkpoint in matches)
+            return f"Checkpoint id '{checkpoint_id}' is ambiguous. Matches: {ids}"
+        return None
+
     def _resolve_checkpoint(self, checkpoint_id: str, *, approve: bool) -> AgentActionResult:
         checkpoint_id = checkpoint_id.strip()
         if not checkpoint_id:
             action = "approve" if approve else "reject"
             return AgentActionResult(False, f"Usage: /agents {action} <checkpoint_id>")
-        for run in self.store.list_runs():
-            for checkpoint in run.checkpoints:
-                if checkpoint.checkpoint_id == checkpoint_id or checkpoint.checkpoint_id.startswith(checkpoint_id):
-                    if checkpoint.status != "pending":
-                        return AgentActionResult(
-                            False,
-                            f"Checkpoint {checkpoint.checkpoint_id} is already {checkpoint.status}.",
-                            run,
-                        )
-                    if not approve:
-                        checkpoint.status = "rejected"
-                        checkpoint.resolved_at = utc_now()
-                        self.store.save(run)
-                        return AgentActionResult(
-                            True,
-                            f"Rejected checkpoint {checkpoint.checkpoint_id}.",
-                            run,
-                        )
-                    if self.tool_executor_factory is None:
-                        return AgentActionResult(False, "Tool executor is not configured.", run)
-                    call = ToolCall(
-                        name=str(checkpoint.tool_call.get("name", "")),
-                        args=dict(checkpoint.tool_call.get("args", {}) or {}),
-                        rationale=str(checkpoint.tool_call.get("rationale", "")),
-                    )
-                    pending = PendingToolCall(
-                        call_id=checkpoint.checkpoint_id,
-                        call=call,
-                        risk=tool_risk(call.name),
-                        requires_approval=True,
-                    )
-                    result = self.tool_executor_factory().execute(pending)
-                    checkpoint.status = "executed" if result.success else "failed"
-                    checkpoint.result = self._tool_result_dict(result)
-                    checkpoint.resolved_at = utc_now()
-                    self.store.save(run)
-                    status = "executed" if result.success else "failed"
-                    return AgentActionResult(
-                        result.success,
-                        f"Checkpoint {checkpoint.checkpoint_id} {status}: {result.summary()}",
-                        run,
-                    )
-        return AgentActionResult(False, f"Checkpoint '{checkpoint_id}' not found.")
+        found = self._find_checkpoint(checkpoint_id)
+        if found is None:
+            return AgentActionResult(False, f"Checkpoint '{checkpoint_id}' not found.")
+        if isinstance(found, str):
+            return AgentActionResult(False, found)
+        run, checkpoint = found
+        if checkpoint.status != "pending":
+            return AgentActionResult(
+                False,
+                f"Checkpoint {checkpoint.checkpoint_id} is already {checkpoint.status}.",
+                run,
+            )
+        if not approve:
+            checkpoint.status = "rejected"
+            checkpoint.resolved_at = utc_now()
+            self.store.save(run)
+            return AgentActionResult(
+                True,
+                f"Rejected checkpoint {checkpoint.checkpoint_id}."
+                f"{self._resume_hint(run)}",
+                run,
+            )
+        if self.tool_executor_factory is None:
+            return AgentActionResult(False, "Tool executor is not configured.", run)
+        call = ToolCall(
+            name=str(checkpoint.tool_call.get("name", "")),
+            args=dict(checkpoint.tool_call.get("args", {}) or {}),
+            rationale=str(checkpoint.tool_call.get("rationale", "")),
+        )
+        pending = PendingToolCall(
+            call_id=checkpoint.checkpoint_id,
+            call=call,
+            risk=tool_risk(call.name),
+            requires_approval=True,
+        )
+        result = self.tool_executor_factory().execute(pending)
+        checkpoint.status = "executed" if result.success else "failed"
+        checkpoint.result = self._tool_result_dict(result)
+        checkpoint.resolved_at = utc_now()
+        self.store.save(run)
+        status = "executed" if result.success else "failed"
+        return AgentActionResult(
+            result.success,
+            f"Checkpoint {checkpoint.checkpoint_id} {status}: {result.summary()}"
+            f"{self._resume_hint(run)}",
+            run,
+        )
+
+    @staticmethod
+    def _resume_hint(run: AgentRun) -> str:
+        if run.status != "paused":
+            return ""
+        if any(item.status == "pending" for item in run.checkpoints):
+            return " More checkpoints are pending; resolve them, then /agents resume."
+        return " Run /agents resume to continue the run."
 
     def _context_for_task(self, run: AgentRun, task: AgentTask) -> str:
         pruning = task.context_pruning or ContextPruning()
@@ -451,6 +562,27 @@ class AgentManager:
                         lines.append(
                             f"Dependency {dep} ({result.role}/{result.status}):\n{result.summary}"
                         )
+        for checkpoint in run.checkpoints:
+            if checkpoint.task_id != task.id or checkpoint.status == "pending":
+                continue
+            tool = checkpoint.tool_call.get("name", "tool")
+            if checkpoint.status == "rejected":
+                lines.append(
+                    f"Tool request '{tool}' (checkpoint {checkpoint.checkpoint_id}) "
+                    "was rejected by the user. Do not request it again; adapt or block."
+                )
+            else:
+                output = ""
+                if checkpoint.result:
+                    output = str(
+                        checkpoint.result.get("output")
+                        or checkpoint.result.get("error")
+                        or ""
+                    )
+                lines.append(
+                    f"Tool '{tool}' (checkpoint {checkpoint.checkpoint_id}) "
+                    f"{checkpoint.status}:\n{output}"
+                )
         text = "\n\n".join(lines).strip()
         if len(text) > pruning.max_context_chars:
             return text[-pruning.max_context_chars :]
@@ -491,11 +623,25 @@ class AgentManager:
         return self.store.latest()
 
     @staticmethod
-    def _task_by_id(run: AgentRun, task_id: str) -> AgentTask | None:
+    def _task_by_id(
+        run: AgentRun,
+        task_id: str,
+        *,
+        allow_prefix: bool = False,
+    ) -> AgentTask | None:
+        """Look up a task by exact id; unique-prefix match is CLI convenience only.
+
+        Internal callers (dependency gating, ancestor chains, critic targets)
+        must use exact ids — a prefix like 'task_1' would otherwise match
+        'task_10'.
+        """
         for task in run.tasks:
-            if task.id == task_id or task.id.startswith(task_id):
+            if task.id == task_id:
                 return task
-        return None
+        if not allow_prefix:
+            return None
+        matches = [task for task in run.tasks if task.id.startswith(task_id)]
+        return matches[0] if len(matches) == 1 else None
 
     @staticmethod
     def _task_status(run: AgentRun, task_id: str) -> str:

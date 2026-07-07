@@ -388,13 +388,25 @@ class ChatController:
             chat_format=profile.chat_format,
         )
 
+    def _profile_used_by_other_roles(self, profile_name: str, role_name: str) -> bool:
+        return any(
+            name != role_name and role.model_profile == profile_name
+            for name, role in self.config.agents.roles.items()
+        )
+
     def _ensure_role_specific_profile(
         self,
         role_name: str,
     ) -> tuple[str, AgentModelProfileConfig]:
         role = self.config.agents.roles[role_name]
         profile_name = role.model_profile or self.config.agents.default_profile
+        # A profile named after the role may already exist as a *shared*
+        # profile (e.g. 'creator' serves both creator and synthesizer).
+        # Mutating it would break the "does not change sibling roles"
+        # guarantee, so shift to a dedicated '<role>_role' profile instead.
         target_name = role_name
+        if self._profile_used_by_other_roles(target_name, role_name):
+            target_name = f"{role_name}_role"
         target = self.config.agents.model_profiles.get(target_name)
         if target is None:
             template = self.config.agents.model_profiles.get(profile_name)
@@ -1884,6 +1896,14 @@ class ChatController:
                 "Agents are disabled. Run /features agents on or /agents on.",
             )
         return self.agent_manager.cancel_run(run_id)
+
+    def resume_agent_run(self, run_id: str = "") -> AgentActionResult:
+        if not self.features.is_enabled("agents"):
+            return AgentActionResult(
+                False,
+                "Agents are disabled. Run /features agents on or /agents on.",
+            )
+        return self.agent_manager.resume_run(run_id)
 
     def get_agent_model_status(self) -> str:
         lines = [

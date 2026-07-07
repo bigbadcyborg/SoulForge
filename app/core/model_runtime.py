@@ -239,6 +239,19 @@ class ModelRuntime:
                     self._profile_paths.pop(loaded_key, None)
             self._chat = None
             gc.collect()
+        else:
+            # A swap profile only borrows memory while it runs: release it as
+            # soon as any other profile loads, or the 70B orchestrator would
+            # stay resident alongside the worker models and blow the VRAM
+            # budget.
+            evicted = False
+            for loaded_key in list(self._chat_profiles):
+                if loaded_key != key and self._profile_residency(loaded_key) == "swap":
+                    self._chat_profiles.pop(loaded_key, None)
+                    self._profile_paths.pop(loaded_key, None)
+                    evicted = True
+            if evicted:
+                gc.collect()
 
         from llama_cpp import Llama
 

@@ -232,6 +232,32 @@ def test_set_agent_role_model_isolates_shared_profile(model_env, monkeypatch) ->
     controller.runtime.unload_chat_profile.assert_called_once_with("critic")
 
 
+def test_set_agent_role_model_does_not_touch_shared_creator_profile(
+    model_env, monkeypatch
+) -> None:
+    _, models_dir, config, _ = model_env
+    (models_dir / "coder.gguf").write_bytes(b"x")
+    controller = ChatController(config)
+    controller.runtime = MagicMock()
+    monkeypatch.setattr(
+        "app.core.chat_controller.save_agents",
+        lambda cfg, path=None: None,
+    )
+
+    # 'creator' names both a role and the shared profile used by synthesizer;
+    # rerouting the role must not mutate the shared profile.
+    message = controller.set_agent_role_model("creator", "coder.gguf")
+
+    assert "Role 'creator'" in message
+    assert config.agents.roles["creator"].model_profile == "creator_role"
+    assert config.agents.roles["synthesizer"].model_profile == "creator"
+    assert config.agents.model_profiles["creator"].chat_model_path is None
+    assert config.agents.model_profiles["creator_role"].chat_model_path.endswith(
+        "coder.gguf"
+    )
+    controller.runtime.unload_chat_profile.assert_called_once_with("creator_role")
+
+
 def test_set_agent_role_model_can_inherit_chat_model(model_env, monkeypatch) -> None:
     _, models_dir, config, _ = model_env
     (models_dir / "critic.gguf").write_bytes(b"x")

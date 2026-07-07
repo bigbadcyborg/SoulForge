@@ -107,3 +107,12 @@ def test_named_profiles_resident_and_swap(monkeypatch, tmp_path) -> None:
     assert list(runtime._chat_profiles) == ["orchestrator"]
     assert any("orchestrator.gguf" in path for path in created)
 
+    # Loading a resident profile must evict the loaded swap profile so the
+    # large orchestrator model does not stay co-resident with the workers.
+    runtime.create_chat_completion_for_profile(
+        "creator",
+        [{"role": "user", "content": "build"}],
+    )
+    assert "orchestrator" not in runtime._chat_profiles
+    assert "creator" in runtime._chat_profiles
+

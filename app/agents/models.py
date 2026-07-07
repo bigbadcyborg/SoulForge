@@ -72,12 +72,18 @@ class ContextPruning:
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> ContextPruning:
         data = data if isinstance(data, dict) else {}
+        # Model-supplied value; fall back to the default rather than letting a
+        # ValueError escape the AgentProtocolError-based repair path.
+        try:
+            max_chars = int(data.get("max_context_chars", 6000) or 6000)
+        except (TypeError, ValueError):
+            max_chars = 6000
         return cls(
             include_goal=bool(data.get("include_goal", True)),
             include_ancestors=bool(data.get("include_ancestors", True)),
             include_dependencies=bool(data.get("include_dependencies", True)),
             exclude_sibling_tasks=bool(data.get("exclude_sibling_tasks", True)),
-            max_context_chars=int(data.get("max_context_chars", 6000) or 6000),
+            max_context_chars=max_chars,
         )
 
 

@@ -43,6 +43,7 @@ Type `/help` in the TUI or CLI for the full list with descriptions. Key commands
 * `/agents status [run_id]`: Inspect agent tasks, statuses, and checkpoints.
 * `/agents edit <task_id> [new spec]`: View or replace a stuck task input spec.
 * `/agents approve <checkpoint_id>` / `/agents reject <checkpoint_id>`: Resolve pending agent tool checkpoints.
+* `/agents resume [run_id]`: Continue a paused run after resolving checkpoints or editing a task.
 * `/status`: Show model, active features, and RAG index stats.
 * `/reload-soul`: Refresh persona from `SOUL.md` without restarting.
 * `/help`: Show all commands with descriptions.
