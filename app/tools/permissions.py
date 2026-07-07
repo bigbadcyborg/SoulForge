@@ -66,6 +66,27 @@ def check_shell_command(config: AppConfig, command: str) -> list[str]:
     return shlex.split(command)
 
 
+def check_network_host(config: AppConfig, host: str) -> str:
+    """Validate a request host against allowNetwork + the domain allowlist.
+
+    Returns the lowercased host. Raises PermissionError when networking is
+    disabled or the host is not on the allowlist. IP-level SSRF checks live in
+    the handler, which resolves the host after this passes.
+    """
+    if not config.tools.allow_network:
+        raise PermissionError("fetch_url disabled (tools.allowNetwork: false)")
+    host = host.strip().lower()
+    if not host:
+        raise PermissionError("Empty host")
+    allowlist = [entry.strip().lower() for entry in config.tools.network_allowlist if entry.strip()]
+    if not allowlist:
+        raise PermissionError("networkAllowlist is empty — no hosts permitted")
+    for entry in allowlist:
+        if host == entry or host.endswith("." + entry):
+            return host
+    raise PermissionError(f"Host not on networkAllowlist: {host}")
+
+
 def tool_risk(name: str) -> ToolRisk:
     mapping = {
         "read_file": ToolRisk.READ,
@@ -73,6 +94,7 @@ def tool_risk(name: str) -> ToolRisk:
         "search_docs": ToolRisk.READ,
         "write_file": ToolRisk.WRITE,
         "run_command": ToolRisk.SHELL,
+        "fetch_url": ToolRisk.NETWORK,
         "create_task": ToolRisk.ACTION,
         "update_memory": ToolRisk.ACTION,
         "create_skill": ToolRisk.ACTION,
@@ -95,12 +117,15 @@ def is_tool_available(config: AppConfig, name: str) -> bool:
         return False
     if name == "run_command" and not config.tools.allow_shell:
         return False
+    if name == "fetch_url" and not config.tools.allow_network:
+        return False
     return name in {
         "read_file",
         "list_dir",
         "search_docs",
         "write_file",
         "run_command",
+        "fetch_url",
         "create_task",
         "update_memory",
         "create_skill",

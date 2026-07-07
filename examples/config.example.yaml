@@ -1,5 +1,5 @@
 model:
-  # chatModelPath can also be changed at runtime with /model
+  # chatModelPath can also be changed at runtime with /model or /models chat
   chatModelPath: ./models/NemoMix-Unleashed-12B-Q4_K_M.gguf
   embeddingModelPath: ./models/embedding-model.gguf
   contextSize: 8192
@@ -24,6 +24,7 @@ features:
   skills: false
   curator: false
   kanban: false
+  agents: false
   streaming: true
   showSources: true
   tools: false
@@ -68,6 +69,49 @@ sessions:
   storePath: ./app/sessions
   maxSavedSessions: 50
 
+agents:
+  # Agent role/profile models can be changed at runtime with /models.
+  # Example: /models role critic Llama-3.1-8B
+  runsPath: ./app/agents/runs
+  maxIterations: 3
+  requireApproval: true
+  strictJson: true
+  residencyMode: hybrid
+  defaultProfile: creator
+  modelProfiles:
+    orchestrator:
+      chatModelPath:
+      residency: swap
+      temperature: 0.2
+      maxTokens: 1400
+    creator:
+      chatModelPath:
+      residency: resident
+      temperature: 0.35
+      maxTokens: 1800
+    critic_executor:
+      chatModelPath:
+      residency: resident
+      temperature: 0.1
+      maxTokens: 1000
+  roles:
+    orchestrator:
+      modelProfile: orchestrator
+    researcher:
+      modelProfile: critic_executor
+      # allowedTools scopes a role to specific tools (empty = no restriction).
+      allowedTools: [read_file, list_dir, search_docs]
+    creator:
+      modelProfile: creator
+    executor:
+      modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, run_command, write_file]
+    critic:
+      modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, search_docs]
+    synthesizer:
+      modelProfile: creator
+
 logging:
   logPath: ./logs/soulforge.log
   level: info
@@ -84,6 +128,10 @@ tools:
     - ./app/tasks
   maxReadBytes: 65536
   shellAllowlist: []
+  # fetch_url is off by default. Enable and list allowed domains to use it.
+  allowNetwork: false
+  networkAllowlist: []
+  # Example: networkAllowlist: [example.com, api.github.com]
   autoApproveReadOnly: true
 
 onboarding:

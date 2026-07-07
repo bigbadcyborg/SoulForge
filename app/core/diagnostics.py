@@ -129,6 +129,19 @@ def format_config_view(config: AppConfig) -> str:
             "Sessions:",
             f"  storePath: {config.sessions.store_dir}",
             "",
+            "Agents:",
+            f"  enabled: {str(config.features.agents).lower()}",
+            f"  runsPath: {config.agents.runs_dir}",
+            f"  maxIterations: {config.agents.max_iterations}",
+            f"  residencyMode: {config.agents.residency_mode}",
+            f"  strictJson: {config.agents.strict_json}",
+            "  profiles:",
+            *[
+                f"    {name}: {profile.residency}, "
+                f"{profile.chat_model or config.model.chat_model}"
+                for name, profile in config.agents.model_profiles.items()
+            ],
+            "",
             "Logging:",
             f"  logPath: {config.logging.log_path}",
             f"  level: {config.logging.level}",
@@ -405,6 +418,19 @@ def run_startup_diagnostics(
                 name="Model runtime",
                 status="ok",
                 message=detail,
+            )
+        )
+
+    if config.features.agents:
+        report.add(
+            DiagnosticCheck(
+                name="Agents",
+                status="warn",
+                message=(
+                    "Agent mode is enabled. Large Orchestrator profiles may spill "
+                    "into system memory and plan slowly."
+                ),
+                remediation="Use /agents for status and profile residency.",
             )
         )
 

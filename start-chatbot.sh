@@ -8,8 +8,18 @@ export CUDAToolkit_ROOT="${CUDAToolkit_ROOT:-$CUDA_HOME}"
 export PATH="$CUDA_HOME/bin:$PATH"
 export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 
-source .venv-wsl/bin/activate
+VENV_DIR="$SCRIPT_DIR/.venv-wsl"
+PYTHON_BIN="$VENV_DIR/bin/python"
 
-python -m app.main
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "ERROR: WSL virtual environment not found at $VENV_DIR"
+  echo "Run ./setup.sh --with-cuda from WSL, then start again."
+  exit 1
+fi
+
+export VIRTUAL_ENV="$VENV_DIR"
+export PATH="$VENV_DIR/bin:$PATH"
+
+"$PYTHON_BIN" -m app.main
 
 exec bash

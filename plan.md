@@ -1074,6 +1074,7 @@ write_file
 list_dir
 search_docs
 run_command
+fetch_url
 create_task
 update_memory
 create_skill
@@ -1111,6 +1112,64 @@ Make setup and usage clean.
 * `doctor.sh` detects common issues.
 * Startup script works from Windows.
 * Project can be cloned without large local files.
+
+---
+
+## Iteration 15: Multi-Agent Orchestration
+
+### Objective
+
+Add an opt-in local multi-agent workflow where an Orchestrator model emits a strict-JSON task graph and delegates work to specialized Researcher, Creator, Executor, Critic, and Synthesizer roles.
+
+### Deliverables
+
+* Named model profiles with resident/swap residency hints
+* `features.agents` and `agents:` config
+* Agent run persistence under `app/agents/runs/`
+* Strict JSON envelope parsing and one repair attempt
+* `parent_task_id` and `context_pruning` for scoped worker context
+* `/agents` CLI and TUI commands
+* Approval checkpoints for risky tool requests
+
+### Acceptance Criteria
+
+* `/agents` remains opt-in and normal chat behavior is unchanged.
+* 32B Creator and 8B Critic/Executor profiles can be resident when VRAM allows.
+* The 70B Orchestrator profile can be swapped in for graph planning, with UI messaging that it may spill into system memory and generate slowly.
+* If resident loading fails, runtime falls back to sequential hot-swapping.
+* Invalid agent JSON gets one repair attempt, then blocks the task.
+* `/agents edit <task_id>` allows manual task input-spec correction.
+* Risky tool requests pause as checkpoints until approved or rejected.
+
+---
+
+## Iteration 16: Agent Pipeline Depth + Network Tool
+
+### Objective
+
+Make the multi-agent pipeline actually use local knowledge, scope each role's
+tools, show progress live, and give the tool harness sandboxed web access.
+
+### Deliverables
+
+* Inject RAG chunks, memory files, and the active skill index into worker task
+  context via `context_pruning` flags (`include_rag`, `include_memory`,
+  `include_skills`); RAG defaults on for the researcher role.
+* Enforce `agents.roles.<role>.allowedTools` (empty = no restriction) so a
+  disallowed tool request is refused before it can run or pause the run.
+* Stream live per-task progress into the TUI/CLI during a run and resume.
+* A `fetch_url` tool: HTTP GET of an allowlisted domain, off by default
+  (`tools.allowNetwork` + `tools.networkAllowlist`), with an SSRF guard that
+  blocks private/loopback addresses, a size cap, and per-hop redirect checks.
+
+### Acceptance Criteria
+
+* Researcher tasks receive retrieved documents without requesting a tool.
+* A tool outside a role's `allowedTools` is refused with a clear error and no
+  checkpoint is created.
+* `/agents run` and `/agents resume` show per-task lines as work happens.
+* `fetch_url` refuses non-allowlisted domains and private/loopback IPs, honors
+  the size cap, and is disabled unless `allowNetwork` is true.
 
 ---
 
@@ -1185,6 +1244,20 @@ Make setup and usage clean.
 /task-move
 /task-done
 /task-delete
+```
+
+### Agent Commands
+
+```text
+/agents
+/agents on
+/agents off
+/agents run <goal>
+/agents status [run_id]
+/agents edit <task_id>
+/agents approve <checkpoint_id>
+/agents reject <checkpoint_id>
+/agents cancel [run_id]
 ```
 
 ---
@@ -1385,6 +1458,15 @@ Kanban dashboard.
 ### v1.3
 
 Controlled tool harness.
+
+### v1.4
+
+Opt-in multi-agent orchestration with local model profiles.
+
+### v1.5
+
+Agent local-context injection, per-role tool scoping, live run progress, and a
+sandboxed network tool.
 
 ---
 

@@ -103,6 +103,59 @@ def validate_config(config: AppConfig) -> list[ConfigIssue]:
             )
         )
 
+    if config.agents.max_iterations <= 0:
+        issues.append(
+            ConfigIssue(
+                field="agents.maxIterations",
+                severity="error",
+                message="agents.maxIterations must be positive.",
+                remediation="Set agents.maxIterations to at least 1.",
+            )
+        )
+
+    if config.agents.residency_mode not in ("hybrid", "sequential"):
+        issues.append(
+            ConfigIssue(
+                field="agents.residencyMode",
+                severity="error",
+                message="agents.residencyMode must be hybrid or sequential.",
+                remediation="Use hybrid for resident worker profiles or sequential for hot-swap only.",
+            )
+        )
+
+    for name, profile in config.agents.model_profiles.items():
+        if profile.residency not in ("resident", "swap"):
+            issues.append(
+                ConfigIssue(
+                    field=f"agents.modelProfiles.{name}.residency",
+                    severity="error",
+                    message="Agent profile residency must be resident or swap.",
+                    remediation="Use resident for 32B/8B worker models or swap for the 70B Orchestrator.",
+                )
+            )
+        if profile.chat_model_path:
+            path = profile.chat_model
+            if path is not None and not path.exists():
+                issues.append(
+                    ConfigIssue(
+                        field=f"agents.modelProfiles.{name}.chatModelPath",
+                        severity="warning" if not config.features.agents else "error",
+                        message=f"Agent profile model not found: {path}",
+                        remediation="Place the GGUF at that path or clear chatModelPath to inherit model.chatModelPath.",
+                    )
+                )
+
+    for role_name, role in config.agents.roles.items():
+        if role.model_profile not in config.agents.model_profiles and role.model_profile != "default":
+            issues.append(
+                ConfigIssue(
+                    field=f"agents.roles.{role_name}.modelProfile",
+                    severity="error",
+                    message=f"Unknown agent model profile: {role.model_profile}",
+                    remediation="Add the profile under agents.modelProfiles or use default.",
+                )
+            )
+
     for name, limit in (
         ("memory.maxUserChars", config.memory.max_user_chars),
         ("memory.maxMemoryChars", config.memory.max_memory_chars),
@@ -165,6 +218,7 @@ def validate_config(config: AppConfig) -> list[ConfigIssue]:
         ("skills.activePath", config.skills.active_dir),
         ("skills.archivedPath", config.skills.archived_dir),
         ("sessions.storePath", config.sessions.store_dir),
+        ("agents.runsPath", config.agents.runs_dir),
         ("memory.userFile", config.memory.user_path.parent),
     ):
         if not _dir_writable(path):

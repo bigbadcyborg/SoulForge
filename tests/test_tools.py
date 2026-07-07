@@ -235,10 +235,27 @@ def test_tools_to_yaml_dict_roundtrip() -> None:
         allow_write=True,
         allow_shell=True,
         shell_allowlist=["git status"],
+        allow_network=True,
+        network_allowlist=["example.com"],
     )
     data = tools_to_yaml_dict(tools)
     assert data["allowWrite"] is True
     assert data["shellAllowlist"] == ["git status"]
+    assert data["allowNetwork"] is True
+    assert data["networkAllowlist"] == ["example.com"]
+
+
+def test_save_tools_persists_network_allowlist(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("app.core.config.PROJECT_ROOT", tmp_path.resolve())
+    config = _tools_config(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr("app.core.config.DEFAULT_CONFIG_PATH", config_path)
+    config.tools.allow_network = True
+    config.tools.network_allowlist.append("example.com")
+    save_tools(config, config_path)
+    reloaded = load_config(config_path)
+    assert reloaded.tools.allow_network is True
+    assert "example.com" in reloaded.tools.network_allowlist
 
 
 def test_save_tools_persists_allowlist(tmp_path, monkeypatch) -> None:

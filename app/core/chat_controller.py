@@ -13,8 +13,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator
 
+from app.agents.manager import AgentActionResult, AgentManager
 from app.core.compute_backend import ComputeBackend
-from app.core.config import PROJECT_ROOT, AppConfig, save_chat_model, save_onboarding, save_tools
+from app.core.config import (
+    PROJECT_ROOT,
+    AgentModelProfileConfig,
+    AppConfig,
+    save_agents,
+    save_chat_model,
+    save_onboarding,
+    save_tools,
+)
 from app.core.diagnostics import (
     format_config_view,
     format_diagnostics_view,
@@ -179,6 +188,14 @@ class ChatController:
         self.skill_manager = SkillManager(config)
         self.task_manager = TaskManager(config)
         self.session_manager = SessionManager(config)
+        self.agent_manager = AgentManager(
+            config,
+            self.runtime,
+            tool_executor_factory=self._tool_executor,
+            retriever_provider=lambda: self.retriever,
+            memory_manager=self.memory_manager,
+            skill_manager=self.skill_manager,
+        )
         self.workflow_observer = WorkflowObserver(config)
         self.features = FeatureStateManager(config, on_change=self._on_feature_change)
 
@@ -309,6 +326,224 @@ class ChatController:
         if not lines:
             return "No chat models found in ./models/. Use /model add <path> to import one."
         return "\n".join(lines)
+
+    def _valid_agent_roles(self) -> str:
+        return ", ".join(self.config.agents.roles)
+
+    def _valid_agent_profiles(self) -> str:
+        return ", ".join(self.config.agents.model_profiles)
+
+    def _resolve_agent_role_name(self, role_name: str) -> str:
+        key = role_name.strip().lower()
+        if not key:
+            raise ValueError(f"Role is required. Valid roles: {self._valid_agent_roles()}")
+        roles = self.config.agents.roles
+        if key in roles:
+            return key
+        matches = [name for name in roles if name.startswith(key)]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            raise ValueError(
+                f"Ambiguous role '{role_name}'. Matches: {', '.join(matches)}"
+            )
+        raise ValueError(
+            f"Unknown agent role '{role_name}'. Valid roles: {self._valid_agent_roles()}"
+        )
+
+    def _resolve_agent_profile_name(self, profile_name: str) -> str:
+        query = profile_name.strip()
+        if not query:
+            raise ValueError(
+                f"Profile is required. Valid profiles: {self._valid_agent_profiles()}"
+            )
+        profiles = self.config.agents.model_profiles
+        if query in profiles:
+            return query
+        exact = [name for name in profiles if name.lower() == query.lower()]
+        if len(exact) == 1:
+            return exact[0]
+        matches = [name for name in profiles if name.lower().startswith(query.lower())]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            raise ValueError(
+                f"Ambiguous profile '{profile_name}'. Matches: {', '.join(matches)}"
+            )
+        raise ValueError(
+            f"Unknown agent profile '{profile_name}'. "
+            f"Valid profiles: {self._valid_agent_profiles()}"
+        )
+
+    def _clone_agent_profile_template(
+        self,
+        profile: AgentModelProfileConfig | None,
+    ) -> AgentModelProfileConfig:
+        if profile is None:
+            return AgentModelProfileConfig()
+        return AgentModelProfileConfig(
+            chat_model_path=profile.chat_model_path,
+            residency=profile.residency,
+            temperature=profile.temperature,
+            top_p=profile.top_p,
+            repeat_penalty=profile.repeat_penalty,
+            max_tokens=profile.max_tokens,
+            chat_format=profile.chat_format,
+        )
+
+    def _profile_used_by_other_roles(self, profile_name: str, role_name: str) -> bool:
+        return any(
+            name != role_name and role.model_profile == profile_name
+            for name, role in self.config.agents.roles.items()
+        )
+
+    def _ensure_role_specific_profile(
+        self,
+        role_name: str,
+    ) -> tuple[str, AgentModelProfileConfig]:
+        role = self.config.agents.roles[role_name]
+        profile_name = role.model_profile or self.config.agents.default_profile
+        # A profile named after the role may already exist as a *shared*
+        # profile (e.g. 'creator' serves both creator and synthesizer).
+        # Mutating it would break the "does not change sibling roles"
+        # guarantee, so shift to a dedicated '<role>_role' profile instead.
+        target_name = role_name
+        if self._profile_used_by_other_roles(target_name, role_name):
+            target_name = f"{role_name}_role"
+        target = self.config.agents.model_profiles.get(target_name)
+        if target is None:
+            template = self.config.agents.model_profiles.get(profile_name)
+            if template is None:
+                template = self.config.agents.model_profiles.get(
+                    self.config.agents.default_profile
+                )
+            target = self._clone_agent_profile_template(template)
+            self.config.agents.model_profiles[target_name] = target
+        role.model_profile = target_name
+        return target_name, target
+
+    def _agent_profile_model_label(self, profile: AgentModelProfileConfig) -> str:
+        if profile.chat_model is None:
+            return f"inherits /model ({self.model_name})"
+        return profile.chat_model.name
+
+    def format_models_view(self) -> str:
+        """Return chat and agent model routing in one view."""
+        lines = [
+            "Model routing:",
+            f"  Chat model: {self.model_name}",
+            f"  Chat path:  {self.config.model.chat_model}",
+            "",
+            "Available chat models:",
+        ]
+        available = list_available_chat_models(self.config)
+        current = self.config.model.chat_model.resolve()
+        if not available:
+            lines.append("  (none found in ./models/; use /model add <path>)")
+        for path in available:
+            marker = "*" if path.resolve() == current else " "
+            lines.append(f"  {marker} {path.name}")
+
+        lines.extend(["", "Agent roles:"])
+        for role_name, role in self.config.agents.roles.items():
+            profile = self.config.agents.model_profiles.get(role.model_profile)
+            if profile is None:
+                lines.append(
+                    f"  {role_name}: missing profile '{role.model_profile}'"
+                )
+                continue
+            lines.append(
+                f"  {role_name}: profile={role.model_profile}, "
+                f"model={self._agent_profile_model_label(profile)}, "
+                f"residency={profile.residency}"
+            )
+
+        lines.extend(["", "Agent profiles:"])
+        for profile_name, profile in self.config.agents.model_profiles.items():
+            lines.append(
+                f"  {profile_name}: model={self._agent_profile_model_label(profile)}, "
+                f"residency={profile.residency}"
+            )
+
+        lines.extend(
+            [
+                "",
+                "Commands:",
+                "  /models chat <model>              Change the normal chat model",
+                "  /models role <role> <model>       Set one agent role to a model",
+                "  /models role <role> inherit       Make one role inherit /model",
+                "  /models profile <profile> <model> Change a shared agent profile",
+            ]
+        )
+        return "\n".join(lines)
+
+    def set_agent_role_model(
+        self,
+        role_name: str,
+        model_selection: str,
+        *,
+        persist: bool = True,
+    ) -> str:
+        """Assign a chat model to one agent role without changing sibling roles."""
+        role_key = self._resolve_agent_role_name(role_name)
+        selection = model_selection.strip()
+        if not selection:
+            raise ValueError("Model name is required. Use /models role <role> <model>.")
+
+        profile_name, profile = self._ensure_role_specific_profile(role_key)
+        inherit_values = {"inherit", "default", "none", "null", "-"}
+        if selection.lower() in inherit_values:
+            profile.chat_model_path = None
+            model_label = f"inherits /model ({self.model_name})"
+        else:
+            resolved = resolve_chat_model_selection(selection, self.config)
+            if not resolved.exists():
+                raise FileNotFoundError(f"Chat model not found: {resolved}")
+            profile.chat_model_path = path_for_config(resolved)
+            model_label = resolved.name
+
+        self.runtime.unload_chat_profile(profile_name)
+        if persist:
+            save_agents(self.config)
+        return (
+            f"Role '{role_key}' now uses profile '{profile_name}' "
+            f"with model: {model_label}. (saved to config.yaml)"
+        )
+
+    def set_agent_profile_model(
+        self,
+        profile_name: str,
+        model_selection: str,
+        *,
+        persist: bool = True,
+    ) -> str:
+        """Assign a chat model to a shared agent model profile."""
+        profile_key = self._resolve_agent_profile_name(profile_name)
+        selection = model_selection.strip()
+        if not selection:
+            raise ValueError(
+                "Model name is required. Use /models profile <profile> <model>."
+            )
+
+        profile = self.config.agents.model_profiles[profile_key]
+        inherit_values = {"inherit", "default", "none", "null", "-"}
+        if selection.lower() in inherit_values:
+            profile.chat_model_path = None
+            model_label = f"inherits /model ({self.model_name})"
+        else:
+            resolved = resolve_chat_model_selection(selection, self.config)
+            if not resolved.exists():
+                raise FileNotFoundError(f"Chat model not found: {resolved}")
+            profile.chat_model_path = path_for_config(resolved)
+            model_label = resolved.name
+
+        self.runtime.unload_chat_profile(profile_key)
+        if persist:
+            save_agents(self.config)
+        return (
+            f"Profile '{profile_key}' now uses model: {model_label}. "
+            "(saved to config.yaml)"
+        )
 
     def switch_chat_model(self, model_path: str | Path, *, persist: bool = True) -> str:
         """Unload the current chat model, load *model_path*, and optionally persist."""
@@ -1608,6 +1843,90 @@ class ChatController:
                 error=str(error),
                 status="failed",
             )
+
+    def run_agent_workflow(
+        self, goal: str, *, on_progress: Callable[[str], None] | None = None
+    ) -> AgentActionResult:
+        if not self.features.is_enabled("agents"):
+            return AgentActionResult(
+                False,
+                "Agents are disabled. Run /features agents on or /agents on.",
+            )
+        return self.agent_manager.start_run(goal, on_progress=on_progress)
+
+    def get_agents_status(self, run_id: str = "") -> AgentActionResult:
+        if not self.features.is_enabled("agents"):
+            return AgentActionResult(
+                False,
+                "Agents are disabled. Run /features agents on or /agents on.",
+            )
+        return self.agent_manager.status(run_id)
+
+    def edit_agent_task(self, task_id: str, new_spec: str = "") -> AgentActionResult:
+        if not self.features.is_enabled("agents"):
+            return AgentActionResult(
+                False,
+                "Agents are disabled. Run /features agents on or /agents on.",
+            )
+        return self.agent_manager.edit_task(task_id, new_spec)
+
+    def get_agent_task_input_spec(self, task_id: str) -> AgentActionResult:
+        if not self.features.is_enabled("agents"):
+            return AgentActionResult(
+                False,
+                "Agents are disabled. Run /features agents on or /agents on.",
+            )
+        return self.agent_manager.task_input_spec(task_id)
+
+    def approve_agent_checkpoint(self, checkpoint_id: str) -> AgentActionResult:
+        if not self.features.is_enabled("agents"):
+            return AgentActionResult(
+                False,
+                "Agents are disabled. Run /features agents on or /agents on.",
+            )
+        return self.agent_manager.approve_checkpoint(checkpoint_id)
+
+    def reject_agent_checkpoint(self, checkpoint_id: str) -> AgentActionResult:
+        if not self.features.is_enabled("agents"):
+            return AgentActionResult(
+                False,
+                "Agents are disabled. Run /features agents on or /agents on.",
+            )
+        return self.agent_manager.reject_checkpoint(checkpoint_id)
+
+    def cancel_agent_run(self, run_id: str = "") -> AgentActionResult:
+        if not self.features.is_enabled("agents"):
+            return AgentActionResult(
+                False,
+                "Agents are disabled. Run /features agents on or /agents on.",
+            )
+        return self.agent_manager.cancel_run(run_id)
+
+    def resume_agent_run(
+        self, run_id: str = "", *, on_progress: Callable[[str], None] | None = None
+    ) -> AgentActionResult:
+        if not self.features.is_enabled("agents"):
+            return AgentActionResult(
+                False,
+                "Agents are disabled. Run /features agents on or /agents on.",
+            )
+        return self.agent_manager.resume_run(run_id, on_progress=on_progress)
+
+    def get_agent_model_status(self) -> str:
+        lines = [
+            f"Agent residency mode: {self.config.agents.residency_mode}",
+            "Model profiles:",
+        ]
+        for status in self.runtime.profile_statuses():
+            loaded = "loaded" if status.loaded else "unloaded"
+            lines.append(
+                f"  {status.name}: {status.residency}, {loaded}, {status.model_path}"
+            )
+        lines.append(
+            "Note: the 70B Orchestrator profile may spill into system memory and "
+            "generate more slowly during graph planning."
+        )
+        return "\n".join(lines)
 
     def run_attack_simulation(self, attack_type: str = "all") -> str:
         """Run built-in red-team simulation payloads without mutating chat history."""

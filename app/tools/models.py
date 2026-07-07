@@ -12,6 +12,7 @@ class ToolRisk(str, Enum):
     READ = "read"
     WRITE = "write"
     SHELL = "shell"
+    NETWORK = "network"
     ACTION = "action"
 
 

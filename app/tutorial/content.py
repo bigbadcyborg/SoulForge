@@ -173,11 +173,63 @@ TUTORIAL_STEPS: tuple[TutorialStep, ...] = (
         ),
     ),
     TutorialStep(
+        id="agents",
+        title="Quest 8 - Multi-Agent Workflows",
+        body=(
+            "Agents are opt-in orchestration runs for larger goals. Normal chat "
+            "does not use them unless you explicitly start a run.\n\n"
+            "Core flow:\n"
+            "  1. /agents on\n"
+            "  2. /agents run <goal>\n"
+            "  3. /agents status\n"
+            "  4. Approve, reject, edit, or cancel if needed\n\n"
+            "Roles in the pipeline:\n"
+            "  orchestrator  - creates and revises the dependency task graph\n"
+            "  researcher    - gathers scoped local context\n"
+            "  creator       - builds the main deliverable\n"
+            "  executor      - requests tools and summarizes logs\n"
+            "  critic        - checks outputs against requirements\n"
+            "  synthesizer   - writes the final answer\n\n"
+            "Commands:\n"
+            "  /agents                         - active/latest run + model residency\n"
+            "  /agents on / /agents off        - toggle the feature\n"
+            "  /agents run <goal>              - start a run\n"
+            "  /agents status [run_id]         - inspect tasks and checkpoints\n"
+            "  /agents edit <task_id> [spec]   - view or replace task input context\n"
+            "  /agents approve <checkpoint_id> - execute a pending tool checkpoint\n"
+            "  /agents reject <checkpoint_id>  - reject a pending tool checkpoint\n"
+            "  /agents resume [run_id]         - continue after checkpoints/edits\n"
+            "  /agents cancel [run_id]         - cancel a run\n\n"
+            "Model routing:\n"
+            "  /models                         - view chat + agent role models\n"
+            "  /models role critic <model>     - set one role's model\n"
+            "  /models role executor inherit   - make one role follow /model\n"
+            "  /models help                    - full model routing guide\n\n"
+            "State and safety:\n"
+            "  - Runs are saved under app/agents/runs/\n"
+            "  - Agent chatter must be strict JSON\n"
+            "  - parent_task_id and context_pruning keep worker context focused\n"
+            "  - Risky tools still go through approval gates and audit logs\n"
+            "  - A 70B Orchestrator may spill into system memory and plan slowly\n\n"
+            "For the complete reference, run /help agents."
+        ),
+        checklist=(
+            ChecklistItem("knows_agents_toggle", "I know agents are opt-in"),
+            ChecklistItem("knows_agents_status", "I know /agents status shows runs"),
+            ChecklistItem("knows_agents_edit", "I know /agents edit can fix stuck tasks"),
+            ChecklistItem("knows_agent_models", "I know /models sets role models"),
+            ChecklistItem("knows_agents_help", "I know /help agents has the full guide"),
+        ),
+    ),
+    TutorialStep(
         id="finish",
         title="Forge Ready!",
         body=(
             "You're set to explore SoulForge on your own terms.\n\n"
             "Quick reference:\n"
+            "  /help models - model routing guide\n"
+            "  /help agents - multi-agent workflow guide\n"
+            "  /agents      - inspect opt-in agent runs\n"
             "  /help        — command catalog\n"
             "  /features    — toggle features (auto-saves)\n"
             "  /session-save / /session-load — save and restore chats\n"

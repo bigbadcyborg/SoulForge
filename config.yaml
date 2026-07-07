@@ -21,6 +21,7 @@ features:
   skills: true
   curator: true
   kanban: false
+  agents: false
   streaming: true
   showSources: true
   tools: false
@@ -58,6 +59,45 @@ tasks:
 sessions:
   storePath: ./app/sessions
   maxSavedSessions: 50
+agents:
+  runsPath: ./app/agents/runs
+  maxIterations: 3
+  requireApproval: true
+  strictJson: true
+  residencyMode: hybrid
+  defaultProfile: creator
+  modelProfiles:
+    orchestrator:
+      chatModelPath:
+      residency: swap
+      temperature: 0.2
+      maxTokens: 1400
+    creator:
+      chatModelPath:
+      residency: resident
+      temperature: 0.35
+      maxTokens: 1800
+    critic_executor:
+      chatModelPath:
+      residency: resident
+      temperature: 0.1
+      maxTokens: 1000
+  roles:
+    orchestrator:
+      modelProfile: orchestrator
+    researcher:
+      modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, search_docs]
+    creator:
+      modelProfile: creator
+    executor:
+      modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, run_command, write_file]
+    critic:
+      modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, search_docs]
+    synthesizer:
+      modelProfile: creator
 logging:
   logPath: ./logs/soulforge.log
   level: info
@@ -73,6 +113,8 @@ tools:
   - ./app/tasks
   maxReadBytes: 65536
   shellAllowlist: []
+  allowNetwork: false
+  networkAllowlist: []
   autoApproveReadOnly: true
 onboarding:
   completed: true

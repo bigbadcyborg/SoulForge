@@ -51,6 +51,8 @@ from app.tui.widgets import (
     SessionBrowserModal,
     SessionDetailModal,
     SessionSaveModal,
+    AgentsStatusModal,
+    AgentTaskEditModal,
     ModelSelectionModal,
     AddModelModal,
     MODEL_ADD_SENTINEL,
@@ -253,6 +255,63 @@ class SoulForgeApp(App):
         self.call_from_thread(self._write_message, "system", report)
         self.call_from_thread(self._simulation_done)
 
+    def _agent_progress(self, line: str) -> None:
+        """Stream a per-task progress line into the chat log (called off-thread)."""
+        self.call_from_thread(self._write_message, "system", line)
+
+    @work(thread=True, exclusive=True, group="model")
+    def _run_agent_workflow(self, goal: str) -> None:
+        try:
+            result = self.controller.run_agent_workflow(
+                goal, on_progress=self._agent_progress
+            )
+        except Exception as error:  # noqa: BLE001
+            self.call_from_thread(
+                self._write_message,
+                "system",
+                f"Agent run failed: {error}",
+            )
+            self.call_from_thread(self._agent_done)
+            return
+        self.call_from_thread(self._write_message, "system", result.message)
+        self.call_from_thread(self._agent_done)
+
+    @work(thread=True, exclusive=True, group="model")
+    def _resume_agent_workflow(self, run_id: str) -> None:
+        try:
+            result = self.controller.resume_agent_run(
+                run_id, on_progress=self._agent_progress
+            )
+        except Exception as error:  # noqa: BLE001
+            self.call_from_thread(
+                self._write_message,
+                "system",
+                f"Agent resume failed: {error}",
+            )
+            self.call_from_thread(self._agent_done)
+            return
+        self.call_from_thread(self._write_message, "system", result.message)
+        self.call_from_thread(self._agent_done)
+
+    @work(thread=True, exclusive=True, group="model")
+    def _resolve_agent_checkpoint(self, checkpoint_id: str, approve: bool) -> None:
+        try:
+            result = (
+                self.controller.approve_agent_checkpoint(checkpoint_id)
+                if approve
+                else self.controller.reject_agent_checkpoint(checkpoint_id)
+            )
+        except Exception as error:  # noqa: BLE001
+            self.call_from_thread(
+                self._write_message,
+                "system",
+                f"Agent checkpoint failed: {error}",
+            )
+            self.call_from_thread(self._agent_done)
+            return
+        self.call_from_thread(self._write_message, "system", result.message)
+        self.call_from_thread(self._agent_done)
+
     # --- worker callbacks (UI thread) ---------------------------------------
 
     def _on_models_loaded(self) -> None:
@@ -303,6 +362,13 @@ class SoulForgeApp(App):
         self.status_bar.set_state("Ready")
         self.prompt.disabled = False
         self.prompt.focus()
+        self._scroll_to_end()
+
+    def _agent_done(self) -> None:
+        self.status_bar.set_state("Ready")
+        self.prompt.disabled = False
+        self.prompt.focus()
+        self.status_bar.set_compute(self.controller.compute_backend)
         self._scroll_to_end()
 
     def _handle_tool_turn(self, tool_turn) -> None:
@@ -496,6 +562,82 @@ class SoulForgeApp(App):
         self._begin_model_job("Switching model...")
         self._switch_model(stripped)
 
+    def _handle_models_command(self, args: str) -> None:
+        stripped = args.strip()
+        if not stripped or stripped.lower() == "list":
+            self._write_message("system", self.controller.format_models_view())
+            return
+
+        parts = stripped.split(maxsplit=2)
+        sub = parts[0].lower()
+
+        if sub == "help":
+            self._write_message(
+                "system",
+                format_help_text("models", self.controller.config),
+            )
+            return
+
+        if sub == "add":
+            self._handle_model_command(stripped)
+            return
+
+        if sub == "chat":
+            if not self.models_ready:
+                self._write_message("system", "Model is still loading, please wait.")
+                return
+            chat_parts = stripped.split(maxsplit=1)
+            if len(chat_parts) < 2:
+                self._write_message("system", "Usage: /models chat <model>")
+                return
+            self._begin_model_job("Switching model...")
+            self._switch_model(chat_parts[1])
+            return
+
+        if sub in ("role", "rule"):
+            if len(parts) < 3:
+                self._write_message(
+                    "system",
+                    "Usage: /models role <role> <model|inherit>",
+                )
+                return
+            try:
+                message = self.controller.set_agent_role_model(parts[1], parts[2])
+            except Exception as error:  # noqa: BLE001
+                self._write_message(
+                    "system",
+                    f"Agent role model update failed: {error}",
+                )
+                return
+            self._write_message("system", message)
+            self.status_bar.set_compute(self.controller.compute_backend)
+            return
+
+        if sub == "profile":
+            if len(parts) < 3:
+                self._write_message(
+                    "system",
+                    "Usage: /models profile <profile> <model|inherit>",
+                )
+                return
+            try:
+                message = self.controller.set_agent_profile_model(parts[1], parts[2])
+            except Exception as error:  # noqa: BLE001
+                self._write_message(
+                    "system",
+                    f"Agent profile model update failed: {error}",
+                )
+                return
+            self._write_message("system", message)
+            self.status_bar.set_compute(self.controller.compute_backend)
+            return
+
+        self._write_message(
+            "system",
+            "Usage: /models | /models chat <model> | "
+            "/models role <role> <model|inherit>",
+        )
+
     def _open_model_modal(self) -> None:
         models = self.controller.list_chat_models()
         modal = ModelSelectionModal(models, self.controller.model_name)
@@ -533,6 +675,103 @@ class SoulForgeApp(App):
         self.status_bar.set_state("Running simulation...")
         self.prompt.disabled = True
         self._run_simulation(attack_type)
+
+    def _handle_agents_command(self, args: str) -> None:
+        stripped = args.strip()
+        if not stripped:
+            status = self.controller.get_agents_status().message
+            model_status = self.controller.get_agent_model_status()
+            self.app.push_screen(AgentsStatusModal(status, model_status))
+            return
+
+        parts = stripped.split(maxsplit=1)
+        sub = parts[0].lower()
+        rest = parts[1] if len(parts) > 1 else ""
+
+        if sub == "help":
+            self._write_message(
+                "system",
+                format_help_text("agents", self.controller.config),
+            )
+            return
+
+        if sub in ("on", "off"):
+            self.controller.set_feature("agents", sub == "on")
+            self._refresh_features()
+            self._write_message("system", f"Agents set to {sub}.")
+            return
+
+        if sub == "run":
+            if not self.models_ready:
+                self._write_message("system", "Model is still loading, please wait.")
+                return
+            if not rest.strip():
+                self._write_message("system", "Usage: /agents run <goal>")
+                return
+            self.status_bar.set_state("Running agents...")
+            self.prompt.disabled = True
+            self._run_agent_workflow(rest)
+            return
+
+        if sub == "resume":
+            if not self.models_ready:
+                self._write_message("system", "Model is still loading, please wait.")
+                return
+            self.status_bar.set_state("Resuming agents...")
+            self.prompt.disabled = True
+            self._resume_agent_workflow(rest)
+            return
+
+        if sub == "status":
+            result = self.controller.get_agents_status(rest)
+            self.app.push_screen(
+                AgentsStatusModal(result.message, self.controller.get_agent_model_status())
+            )
+            return
+
+        if sub == "edit":
+            edit_parts = rest.split(maxsplit=1)
+            if not edit_parts:
+                self._write_message("system", "Usage: /agents edit <task_id> [new input spec]")
+                return
+            task_id = edit_parts[0]
+            if len(edit_parts) > 1:
+                self._write_message(
+                    "system",
+                    self.controller.edit_agent_task(task_id, edit_parts[1]).message,
+                )
+                return
+            spec = self.controller.get_agent_task_input_spec(task_id)
+            if not spec.success:
+                self._write_message("system", spec.message)
+                return
+            self.app.push_screen(
+                AgentTaskEditModal(task_id, spec.message),
+                self._handle_agent_task_edit_result,
+            )
+            return
+
+        if sub in ("approve", "reject"):
+            if not rest.strip():
+                self._write_message("system", f"Usage: /agents {sub} <checkpoint_id>")
+                return
+            self.status_bar.set_state("Resolving agent checkpoint...")
+            self.prompt.disabled = True
+            self._resolve_agent_checkpoint(rest, approve=sub == "approve")
+            return
+
+        if sub == "cancel":
+            self._write_message("system", self.controller.cancel_agent_run(rest).message)
+            return
+
+        self._write_message("system", "Usage: /agents | /agents run <goal> | /help agents")
+
+    def _handle_agent_task_edit_result(self, result: tuple[str, str] | None) -> None:
+        if result is None:
+            self._write_message("system", "Agent task edit cancelled.")
+            return
+        task_id, content = result
+        self._write_message("system", self.controller.edit_agent_task(task_id, content).message)
 
     # --- helpers (UI thread) -------------------------------------------------
 
@@ -1387,6 +1626,8 @@ class SoulForgeApp(App):
                 self._handle_model_command(args)
             else:
                 self._open_model_modal()
+        elif command == "/models":
+            self._handle_models_command(args)
         elif command == "/reload-soul":
             if not self.models_ready:
                 self._write_message("system", "Model is still loading, please wait.")
@@ -1447,6 +1688,8 @@ class SoulForgeApp(App):
             self._handle_task_accept_command(args)
         elif command == "/task-reject":
             self._handle_task_reject_command(args)
+        elif command == "/agents":
+            self._handle_agents_command(args)
         elif command == "/session-list":
             self._handle_session_list_command()
         elif command == "/session-save":
