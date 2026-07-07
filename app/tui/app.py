@@ -255,10 +255,16 @@ class SoulForgeApp(App):
         self.call_from_thread(self._write_message, "system", report)
         self.call_from_thread(self._simulation_done)
 
+    def _agent_progress(self, line: str) -> None:
+        """Stream a per-task progress line into the chat log (called off-thread)."""
+        self.call_from_thread(self._write_message, "system", line)
+
     @work(thread=True, exclusive=True, group="model")
     def _run_agent_workflow(self, goal: str) -> None:
         try:
-            result = self.controller.run_agent_workflow(goal)
+            result = self.controller.run_agent_workflow(
+                goal, on_progress=self._agent_progress
+            )
         except Exception as error:  # noqa: BLE001
             self.call_from_thread(
                 self._write_message,
@@ -273,7 +279,9 @@ class SoulForgeApp(App):
     @work(thread=True, exclusive=True, group="model")
     def _resume_agent_workflow(self, run_id: str) -> None:
         try:
-            result = self.controller.resume_agent_run(run_id)
+            result = self.controller.resume_agent_run(
+                run_id, on_progress=self._agent_progress
+            )
         except Exception as error:  # noqa: BLE001
             self.call_from_thread(
                 self._write_message,

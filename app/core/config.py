@@ -239,10 +239,19 @@ def default_agent_model_profiles() -> dict[str, AgentModelProfileConfig]:
 def default_agent_roles() -> dict[str, AgentRoleConfig]:
     return {
         "orchestrator": AgentRoleConfig(model_profile="orchestrator"),
-        "researcher": AgentRoleConfig(model_profile="critic_executor"),
+        "researcher": AgentRoleConfig(
+            model_profile="critic_executor",
+            allowed_tools=["read_file", "list_dir", "search_docs"],
+        ),
         "creator": AgentRoleConfig(model_profile="creator"),
-        "executor": AgentRoleConfig(model_profile="critic_executor"),
-        "critic": AgentRoleConfig(model_profile="critic_executor"),
+        "executor": AgentRoleConfig(
+            model_profile="critic_executor",
+            allowed_tools=["read_file", "list_dir", "run_command", "write_file"],
+        ),
+        "critic": AgentRoleConfig(
+            model_profile="critic_executor",
+            allowed_tools=["read_file", "list_dir", "search_docs"],
+        ),
         "synthesizer": AgentRoleConfig(model_profile="creator"),
     }
 
@@ -284,6 +293,8 @@ class ToolsConfig:
     )
     max_read_bytes: int = 65536
     shell_allowlist: list[str] = field(default_factory=list)
+    allow_network: bool = False
+    network_allowlist: list[str] = field(default_factory=list)
     auto_approve_read_only: bool = True
 
     @property
@@ -490,6 +501,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         ),
         max_read_bytes=tools_section.get("maxReadBytes", 65536),
         shell_allowlist=tools_section.get("shellAllowlist", []),
+        allow_network=tools_section.get("allowNetwork", False),
+        network_allowlist=tools_section.get("networkAllowlist", []),
         auto_approve_read_only=tools_section.get("autoApproveReadOnly", True),
     )
 
@@ -533,6 +546,8 @@ def tools_to_yaml_dict(tools: ToolsConfig) -> dict[str, Any]:
         "writeRoots": list(tools.write_roots),
         "maxReadBytes": tools.max_read_bytes,
         "shellAllowlist": list(tools.shell_allowlist),
+        "allowNetwork": tools.allow_network,
+        "networkAllowlist": list(tools.network_allowlist),
         "autoApproveReadOnly": tools.auto_approve_read_only,
     }
 

@@ -665,12 +665,12 @@ def _handle_agents_cli(controller: ChatController, args: str) -> None:
         return
 
     if sub == "run":
-        result = controller.run_agent_workflow(rest)
+        result = controller.run_agent_workflow(rest, on_progress=print)
         print(result.message)
         return
 
     if sub == "resume":
-        print(controller.resume_agent_run(rest).message)
+        print(controller.resume_agent_run(rest, on_progress=print).message)
         return
 
     if sub == "status":

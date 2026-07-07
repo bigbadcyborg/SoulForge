@@ -58,6 +58,9 @@ class ContextPruning:
     include_ancestors: bool = True
     include_dependencies: bool = True
     exclude_sibling_tasks: bool = True
+    include_rag: bool = False
+    include_memory: bool = False
+    include_skills: bool = False
     max_context_chars: int = 6000
 
     def to_dict(self) -> dict[str, Any]:
@@ -66,6 +69,9 @@ class ContextPruning:
             "include_ancestors": self.include_ancestors,
             "include_dependencies": self.include_dependencies,
             "exclude_sibling_tasks": self.exclude_sibling_tasks,
+            "include_rag": self.include_rag,
+            "include_memory": self.include_memory,
+            "include_skills": self.include_skills,
             "max_context_chars": self.max_context_chars,
         }
 
@@ -83,6 +89,9 @@ class ContextPruning:
             include_ancestors=bool(data.get("include_ancestors", True)),
             include_dependencies=bool(data.get("include_dependencies", True)),
             exclude_sibling_tasks=bool(data.get("exclude_sibling_tasks", True)),
+            include_rag=bool(data.get("include_rag", False)),
+            include_memory=bool(data.get("include_memory", False)),
+            include_skills=bool(data.get("include_skills", False)),
             max_context_chars=max_chars,
         )
 

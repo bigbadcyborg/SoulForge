@@ -192,6 +192,9 @@ class ChatController:
             config,
             self.runtime,
             tool_executor_factory=self._tool_executor,
+            retriever_provider=lambda: self.retriever,
+            memory_manager=self.memory_manager,
+            skill_manager=self.skill_manager,
         )
         self.workflow_observer = WorkflowObserver(config)
         self.features = FeatureStateManager(config, on_change=self._on_feature_change)
@@ -1841,13 +1844,15 @@ class ChatController:
                 status="failed",
             )
 
-    def run_agent_workflow(self, goal: str) -> AgentActionResult:
+    def run_agent_workflow(
+        self, goal: str, *, on_progress: Callable[[str], None] | None = None
+    ) -> AgentActionResult:
         if not self.features.is_enabled("agents"):
             return AgentActionResult(
                 False,
                 "Agents are disabled. Run /features agents on or /agents on.",
             )
-        return self.agent_manager.start_run(goal)
+        return self.agent_manager.start_run(goal, on_progress=on_progress)
 
     def get_agents_status(self, run_id: str = "") -> AgentActionResult:
         if not self.features.is_enabled("agents"):
@@ -1897,13 +1902,15 @@ class ChatController:
             )
         return self.agent_manager.cancel_run(run_id)
 
-    def resume_agent_run(self, run_id: str = "") -> AgentActionResult:
+    def resume_agent_run(
+        self, run_id: str = "", *, on_progress: Callable[[str], None] | None = None
+    ) -> AgentActionResult:
         if not self.features.is_enabled("agents"):
             return AgentActionResult(
                 False,
                 "Agents are disabled. Run /features agents on or /agents on.",
             )
-        return self.agent_manager.resume_run(run_id)
+        return self.agent_manager.resume_run(run_id, on_progress=on_progress)
 
     def get_agent_model_status(self) -> str:
         lines = [

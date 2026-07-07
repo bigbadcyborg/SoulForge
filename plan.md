@@ -1074,6 +1074,7 @@ write_file
 list_dir
 search_docs
 run_command
+fetch_url
 create_task
 update_memory
 create_skill
@@ -1139,6 +1140,36 @@ Add an opt-in local multi-agent workflow where an Orchestrator model emits a str
 * Invalid agent JSON gets one repair attempt, then blocks the task.
 * `/agents edit <task_id>` allows manual task input-spec correction.
 * Risky tool requests pause as checkpoints until approved or rejected.
+
+---
+
+## Iteration 16: Agent Pipeline Depth + Network Tool
+
+### Objective
+
+Make the multi-agent pipeline actually use local knowledge, scope each role's
+tools, show progress live, and give the tool harness sandboxed web access.
+
+### Deliverables
+
+* Inject RAG chunks, memory files, and the active skill index into worker task
+  context via `context_pruning` flags (`include_rag`, `include_memory`,
+  `include_skills`); RAG defaults on for the researcher role.
+* Enforce `agents.roles.<role>.allowedTools` (empty = no restriction) so a
+  disallowed tool request is refused before it can run or pause the run.
+* Stream live per-task progress into the TUI/CLI during a run and resume.
+* A `fetch_url` tool: HTTP GET of an allowlisted domain, off by default
+  (`tools.allowNetwork` + `tools.networkAllowlist`), with an SSRF guard that
+  blocks private/loopback addresses, a size cap, and per-hop redirect checks.
+
+### Acceptance Criteria
+
+* Researcher tasks receive retrieved documents without requesting a tool.
+* A tool outside a role's `allowedTools` is refused with a clear error and no
+  checkpoint is created.
+* `/agents run` and `/agents resume` show per-task lines as work happens.
+* `fetch_url` refuses non-allowlisted domains and private/loopback IPs, honors
+  the size cap, and is disabled unless `allowNetwork` is true.
 
 ---
 
@@ -1431,6 +1462,11 @@ Controlled tool harness.
 ### v1.4
 
 Opt-in multi-agent orchestration with local model profiles.
+
+### v1.5
+
+Agent local-context injection, per-role tool scoping, live run progress, and a
+sandboxed network tool.
 
 ---
 

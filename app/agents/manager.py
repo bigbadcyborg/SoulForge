@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from app.agents.json_protocol import (
     AgentProtocolError,
@@ -35,7 +35,19 @@ from app.tools.executor import ToolExecutor
 from app.tools.models import PendingToolCall, ToolCall, ToolResult
 from app.tools.permissions import tool_risk
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from app.memory.memory_manager import MemoryManager
+    from app.rag.retriever import Retriever
+    from app.skills.skill_manager import SkillManager
+
 ToolExecutorFactory = Callable[[], ToolExecutor]
+RetrieverProvider = Callable[[], "Retriever | None"]
+ProgressCallback = Callable[[str], None]
+
+# Roles that receive retrieved RAG context by default. The researcher exists to
+# gather local context, so it is the natural recipient; other roles can still
+# opt in via the task's context_pruning.include_rag flag.
+_RAG_DEFAULT_ROLES: frozenset[str] = frozenset({"researcher"})
 
 
 @dataclass
@@ -54,58 +66,84 @@ class AgentManager:
         runtime: ModelRuntime,
         *,
         tool_executor_factory: ToolExecutorFactory | None = None,
+        retriever_provider: RetrieverProvider | None = None,
+        memory_manager: "MemoryManager | None" = None,
+        skill_manager: "SkillManager | None" = None,
     ) -> None:
         self.config = config
         self.runtime = runtime
         self.store = AgentRunStore(config)
         self.tool_executor_factory = tool_executor_factory
+        self.retriever_provider = retriever_provider
+        self.memory_manager = memory_manager
+        self.skill_manager = skill_manager
+        self.on_progress: ProgressCallback | None = None
         self.active_run_id: str = ""
 
-    def start_run(self, goal: str) -> AgentActionResult:
+    def _emit(self, line: str) -> None:
+        """Report a short progress line, never letting the callback break a run."""
+        if self.on_progress is None:
+            return
+        try:
+            self.on_progress(line)
+        except Exception:  # noqa: BLE001 - progress is best-effort
+            pass
+
+    def start_run(
+        self, goal: str, *, on_progress: ProgressCallback | None = None
+    ) -> AgentActionResult:
         goal = goal.strip()
         if not goal:
             return AgentActionResult(False, "Usage: /agents run <goal>")
 
-        run = AgentRun(run_id=new_id("run"), goal=goal, status="running")
-        self.active_run_id = run.run_id
-        self.store.save(run)
-
-        warnings: list[str] = []
+        self.on_progress = on_progress
         try:
-            plan = self._run_envelope(
-                role="orchestrator",
-                task_id="plan",
-                run=run,
-                messages=orchestrator_messages(
+            run = AgentRun(run_id=new_id("run"), goal=goal, status="running")
+            self.active_run_id = run.run_id
+            self.store.save(run)
+
+            warnings: list[str] = []
+            try:
+                self._emit("● orchestrator: planning task graph")
+                plan = self._run_envelope(
+                    role="orchestrator",
+                    task_id="plan",
+                    run=run,
+                    messages=orchestrator_messages(
+                        run,
+                        self.config.agents.max_iterations,
+                    ),
+                )
+                run.results.append(plan.to_result())
+                run.tasks = tasks_from_planner_envelope(
+                    plan,
+                    default_max_attempts=self.config.agents.max_iterations,
+                )
+                self._emit(f"● plan ready: {len(run.tasks)} task(s)")
+                self.store.save(run)
+                # Warm residents only after planning: the orchestrator's swap
+                # profile evicts every other loaded profile, so warming earlier
+                # would load the worker models just to throw them away.
+                warnings = self.runtime.warm_resident_profiles()
+                self._execute_run(run)
+            except Exception as error:  # noqa: BLE001
+                run.status = "blocked"
+                run.results.append(self._error_result(str(error)))
+                self.store.save(run)
+                warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
+                return AgentActionResult(
+                    False,
+                    f"Agent run blocked during planning: {error}{warning_text}",
                     run,
-                    self.config.agents.max_iterations,
-                ),
-            )
-            run.results.append(plan.to_result())
-            run.tasks = tasks_from_planner_envelope(
-                plan,
-                default_max_attempts=self.config.agents.max_iterations,
-            )
-            self.store.save(run)
-            # Warm residents only after planning: the orchestrator's swap
-            # profile evicts every other loaded profile, so warming earlier
-            # would load the worker models just to throw them away.
-            warnings = self.runtime.warm_resident_profiles()
-            self._execute_run(run)
-        except Exception as error:  # noqa: BLE001
-            run.status = "blocked"
-            run.results.append(self._error_result(str(error)))
-            self.store.save(run)
-            warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
-            return AgentActionResult(
-                False,
-                f"Agent run blocked during planning: {error}{warning_text}",
-                run,
-            )
+                )
 
-        return self._run_outcome(run, warnings)
+            return self._run_outcome(run, warnings)
+        finally:
+            self.on_progress = None
 
-    def resume_run(self, run_id: str = "") -> AgentActionResult:
+    def resume_run(
+        self, run_id: str = "", *, on_progress: ProgressCallback | None = None
+    ) -> AgentActionResult:
         """Continue a paused run after checkpoints are resolved or a task is edited."""
         run = self._resolve_run(run_id)
         if run is None:
@@ -125,28 +163,33 @@ class AgentManager:
                 run,
             )
 
-        self.active_run_id = run.run_id
-        for task in run.tasks:
-            if task.status in ("paused", "blocked", "revising", "running"):
-                task.status = "pending"
-                task.attempts = 0
-                task.updated_at = utc_now()
-
-        warnings = self.runtime.warm_resident_profiles()
+        self.on_progress = on_progress
         try:
-            self._execute_run(run)
-        except Exception as error:  # noqa: BLE001
-            run.status = "blocked"
-            run.results.append(self._error_result(str(error)))
-            self.store.save(run)
-            warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
-            return AgentActionResult(
-                False,
-                f"Agent run blocked while resuming: {error}{warning_text}",
-                run,
-            )
+            self.active_run_id = run.run_id
+            for task in run.tasks:
+                if task.status in ("paused", "blocked", "revising", "running"):
+                    task.status = "pending"
+                    task.attempts = 0
+                    task.updated_at = utc_now()
 
-        return self._run_outcome(run, warnings)
+            self._emit(f"● resuming run {run.run_id}")
+            warnings = self.runtime.warm_resident_profiles()
+            try:
+                self._execute_run(run)
+            except Exception as error:  # noqa: BLE001
+                run.status = "blocked"
+                run.results.append(self._error_result(str(error)))
+                self.store.save(run)
+                warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
+                return AgentActionResult(
+                    False,
+                    f"Agent run blocked while resuming: {error}{warning_text}",
+                    run,
+                )
+
+            return self._run_outcome(run, warnings)
+        finally:
+            self.on_progress = None
 
     def _run_outcome(self, run: AgentRun, warnings: list[str]) -> AgentActionResult:
         warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
@@ -277,6 +320,7 @@ class AgentManager:
                 return
 
         for _ in range(max(1, self.config.agents.max_iterations)):
+            self._emit("● critic: reviewing run against the goal")
             critic = self._run_envelope(
                 role="critic",
                 task_id="critic",
@@ -284,7 +328,9 @@ class AgentManager:
                 messages=critic_messages(run, result_context(run)),
             )
             run.results.append(critic.to_result())
+            self._emit(f"● critic verdict: {critic.status}")
             if critic.status == "pass":
+                self._emit("● synthesizer: composing final answer")
                 final = self._run_envelope(
                     role="synthesizer",
                     task_id="final",
@@ -294,6 +340,7 @@ class AgentManager:
                 run.results.append(final.to_result())
                 run.final_answer = final.summary
                 run.status = "completed"
+                self._emit("✓ run completed")
                 self.store.save(run)
                 return
             if critic.status == "blocked":
@@ -305,6 +352,7 @@ class AgentManager:
                 run.status = "blocked"
                 self.store.save(run)
                 return
+            self._emit(f"↻ revising {target.role}/{target.id}: {target.title}")
             target.status = "pending"
             # A critic-requested revision grants fresh attempts; otherwise a
             # task that passed on its final attempt would re-block instantly.
@@ -326,6 +374,10 @@ class AgentManager:
             task.status = "running"
             task.attempts += 1
             task.updated_at = utc_now()
+            self._emit(
+                f"▶ {task.role}/{task.id} "
+                f"(attempt {task.attempts}/{task.max_attempts}): {task.title}"
+            )
             self.store.save(run)
             context = self._context_for_task(run, task)
             envelope = self._run_envelope(
@@ -340,21 +392,25 @@ class AgentManager:
             if paused:
                 task.status = "paused"
                 run.status = "paused"
+                self._emit(f"⏸ {task.role}/{task.id} paused for tool approval")
                 self.store.save(run)
                 return
             if envelope.status == "pass":
                 task.status = "passed"
+                self._emit(f"✓ {task.role}/{task.id} passed")
                 self.store.save(run)
                 return
             if envelope.status == "blocked":
                 task.status = "blocked"
                 run.status = "blocked"
+                self._emit(f"✗ {task.role}/{task.id} blocked")
                 self.store.save(run)
                 return
             task.status = "revising"
             self.store.save(run)
         task.status = "blocked"
         run.status = "blocked"
+        self._emit(f"✗ {task.role}/{task.id} blocked (max attempts)")
         self.store.save(run)
 
     def _run_envelope(
@@ -433,11 +489,24 @@ class AgentManager:
             result.errors.append("Tool requests are not configured for agent runs.")
             return False
         executor = self.tool_executor_factory()
+        role_config = self.config.agents.roles.get(task.role)
+        allowed = list(role_config.allowed_tools) if role_config else []
         paused = False
         for item in requests:
             name = str(item.get("name", "")).strip()
             args = item.get("args") if isinstance(item.get("args"), dict) else {}
             rationale = str(item.get("rationale", "")).strip()
+            # An empty allowlist means "no per-role restriction". A non-empty
+            # allowlist scopes the role to exactly those tools; anything else is
+            # refused before it can run or become a checkpoint.
+            if allowed and name not in allowed:
+                message = (
+                    f"Tool '{name}' not allowed for role '{task.role}'. "
+                    f"Allowed: {', '.join(allowed)}."
+                )
+                result.errors.append(message)
+                self._emit(f"  ✗ {task.role} tool blocked: {name}")
+                continue
             call = ToolCall(name=name, args=args, rationale=rationale)
             pending = executor.classify(call)
             if pending.requires_approval and self.config.agents.require_approval:
@@ -562,6 +631,7 @@ class AgentManager:
                         lines.append(
                             f"Dependency {dep} ({result.role}/{result.status}):\n{result.summary}"
                         )
+        lines.extend(self._local_context(run, task, pruning))
         for checkpoint in run.checkpoints:
             if checkpoint.task_id != task.id or checkpoint.status == "pending":
                 continue
@@ -587,6 +657,85 @@ class AgentManager:
         if len(text) > pruning.max_context_chars:
             return text[-pruning.max_context_chars :]
         return text
+
+    def _local_context(
+        self, run: AgentRun, task: AgentTask, pruning: ContextPruning
+    ) -> list[str]:
+        """Inject retrieved RAG chunks, memory files, and the skill index.
+
+        Every source is best-effort: a missing vector store, unreadable memory
+        file, or empty registry must never block a run.
+        """
+        lines: list[str] = []
+        want_rag = pruning.include_rag or task.role in _RAG_DEFAULT_ROLES
+        if want_rag:
+            rag = self._rag_context(task)
+            if rag:
+                lines.append(rag)
+        if pruning.include_memory:
+            memory = self._memory_context()
+            if memory:
+                lines.append(memory)
+        if pruning.include_skills:
+            skills = self._skill_index()
+            if skills:
+                lines.append(skills)
+        return lines
+
+    def _rag_context(self, task: AgentTask) -> str:
+        if self.retriever_provider is None:
+            return ""
+        try:
+            retriever = self.retriever_provider()
+            if retriever is None:
+                return ""
+            query = f"{task.title}\n{task.instructions}".strip()
+            chunks = retriever.retrieve(query)
+            if not chunks:
+                return ""
+            from app.rag.retriever import Retriever
+
+            return "Retrieved documents (RAG):\n" + Retriever.format_context(chunks)
+        except Exception as error:  # noqa: BLE001 - RAG is supplementary
+            return f"(RAG retrieval unavailable: {error})"
+
+    def _memory_context(self) -> str:
+        if self.memory_manager is None:
+            return ""
+        try:
+            snapshot = self.memory_manager.load()
+        except Exception:  # noqa: BLE001 - memory is supplementary
+            return ""
+        if snapshot.is_empty:
+            return ""
+        parts = []
+        if snapshot.user:
+            parts.append(f"User facts:\n{snapshot.user}")
+        if snapshot.memory:
+            parts.append(f"Project memory:\n{snapshot.memory}")
+        if snapshot.session:
+            parts.append(f"Session notes:\n{snapshot.session}")
+        return "Local memory:\n" + "\n\n".join(parts)
+
+    def _skill_index(self) -> str:
+        if self.skill_manager is None:
+            return ""
+        try:
+            skills = self.skill_manager.list_skills(status="active")
+        except Exception:  # noqa: BLE001 - skills are supplementary
+            return ""
+        if not skills:
+            return ""
+        entries = []
+        for meta in skills:
+            name = str(meta.get("name", "")).strip()
+            if not name:
+                continue
+            desc = str(meta.get("description") or meta.get("trigger") or "").strip()
+            entries.append(f"- {name}: {desc}" if desc else f"- {name}")
+        if not entries:
+            return ""
+        return "Available skills (request via tools if needed):\n" + "\n".join(entries)
 
     def _ancestor_context(self, run: AgentRun, parent_id: str) -> list[str]:
         lines: list[str] = []

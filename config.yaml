@@ -87,12 +87,15 @@ agents:
       modelProfile: orchestrator
     researcher:
       modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, search_docs]
     creator:
       modelProfile: creator
     executor:
       modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, run_command, write_file]
     critic:
       modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, search_docs]
     synthesizer:
       modelProfile: creator
 logging:
@@ -110,6 +113,8 @@ tools:
   - ./app/tasks
   maxReadBytes: 65536
   shellAllowlist: []
+  allowNetwork: false
+  networkAllowlist: []
   autoApproveReadOnly: true
 onboarding:
   completed: true

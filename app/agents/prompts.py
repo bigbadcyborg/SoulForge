@@ -23,6 +23,9 @@ ENVELOPE_SHAPE = {
         "include_ancestors": True,
         "include_dependencies": True,
         "exclude_sibling_tasks": True,
+        "include_rag": False,
+        "include_memory": False,
+        "include_skills": False,
         "max_context_chars": 6000,
     },
     "status": "pass",
@@ -71,7 +74,11 @@ def orchestrator_messages(run: AgentRun, max_iterations: int) -> list[dict[str, 
         "Use only these worker roles: researcher, creator, executor, critic, "
         "synthesizer. Include parent_task_id when a task refines a prior task. "
         "Do not create unrelated sibling dependencies. Put the graph in an "
-        "artifact with type='task_graph' and a tasks array."
+        "artifact with type='task_graph' and a tasks array. Use context_pruning "
+        "to scope each task's context: set include_rag true for tasks that need "
+        "indexed documents, include_memory true for tasks that depend on stored "
+        "user/project facts, and include_skills true when a task should know "
+        "which local skills exist."
     )
     user = (
         f"Run ID: {run.run_id}\n"

@@ -10,7 +10,7 @@ from app.memory.memory_reviewer import MemorySuggestion
 from app.rag.retriever import Retriever
 from app.skills.skill_crystallizer import SkillSuggestion
 from app.tasks.task_manager import TaskManager
-from app.tools.handlers import bridge, fs, shell
+from app.tools.handlers import bridge, fs, net, shell
 from app.tools.models import PendingToolCall, ToolCall, ToolResult
 from app.tools.permissions import is_tool_available, requires_approval, tool_risk
 from app.tools.tool_log import log_tool_event
@@ -104,6 +104,8 @@ class ToolExecutor:
             return fs.write_file(config, args)
         if name == "run_command":
             return shell.run_command(config, args)
+        if name == "fetch_url":
+            return net.fetch_url(config, args)
         if name == "search_docs":
             return self._search_docs(args)
         if name == "create_task":

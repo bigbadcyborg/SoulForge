@@ -99,12 +99,16 @@ agents:
       modelProfile: orchestrator
     researcher:
       modelProfile: critic_executor
+      # allowedTools scopes a role to specific tools (empty = no restriction).
+      allowedTools: [read_file, list_dir, search_docs]
     creator:
       modelProfile: creator
     executor:
       modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, run_command, write_file]
     critic:
       modelProfile: critic_executor
+      allowedTools: [read_file, list_dir, search_docs]
     synthesizer:
       modelProfile: creator
 
@@ -124,6 +128,10 @@ tools:
     - ./app/tasks
   maxReadBytes: 65536
   shellAllowlist: []
+  # fetch_url is off by default. Enable and list allowed domains to use it.
+  allowNetwork: false
+  networkAllowlist: []
+  # Example: networkAllowlist: [example.com, api.github.com]
   autoApproveReadOnly: true
 
 onboarding:

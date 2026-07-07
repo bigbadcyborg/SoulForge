@@ -15,7 +15,8 @@ This project is designed to run locally (Windows/WSL) with CUDA acceleration for
 * **Document Ingestion**: Index `docs/` into ChromaDB with `/ingest` or `python ingestDocs.py` (text + PDF/OCR).
 * **Source Viewer**: Inspect retrieved chunks from the last question with `/sources`.
 * **Tools Workshop**: Open `/tools` (or `/tool`) in TUI to add shell allowlist entries and run manual tool tests with visible output.
-* **Opt-in Multi-Agent Workflows**: Use `/agents run <goal>` to let a local Orchestrator create a strict-JSON task graph and delegate scoped work to Researcher, Creator, Executor, Critic, and Synthesizer roles.
+* **Sandboxed Network Tool**: An opt-in `fetch_url` tool does HTTP GETs of allowlisted domains only, blocking private/loopback addresses with a size cap.
+* **Opt-in Multi-Agent Workflows**: Use `/agents run <goal>` to let a local Orchestrator create a strict-JSON task graph and delegate scoped work to Researcher, Creator, Executor, Critic, and Synthesizer roles — with live per-task progress, per-role tool scoping, and optional RAG/memory/skill context per task.
 * **WSL 2 & CUDA support**: Optimized for NVIDIA GPUs (including Blackwell/RTX 5090) within WSL Ubuntu.
 * **Persona Hot-Reload**: Update `SOUL.md` and reload the character instantly with `/reload-soul`.
 * **Compute Indicator**: Status bar shows **GPU** or **CPU** after the model loads.
@@ -370,6 +371,7 @@ Default behavior:
 * `features.tools` is off by default.
 * Risky tools still require approval.
 * Shell tools are blocked unless both `allowShell: true` and `shellAllowlist` contains matching command prefixes.
+* The `fetch_url` network tool is blocked unless both `allowNetwork: true` and `networkAllowlist` contains the target domain; it blocks private/loopback addresses and caps the response size.
 * Tool events are logged to `logs/tool_calls.jsonl`.
 
 Enable tools in `config.yaml`:
@@ -405,7 +407,7 @@ Start a run with:
 /agents run Build a small CLI utility and review it for edge cases
 ```
 
-SoulForge stores agent runs under `app/agents/runs/` and requires strict JSON envelopes between roles. Each task includes `parent_task_id` and `context_pruning` so workers receive the root goal, ancestors, dependencies, and relevant artifacts without unrelated sibling-task chatter.
+SoulForge stores agent runs under `app/agents/runs/` and requires strict JSON envelopes between roles. Each task includes `parent_task_id` and `context_pruning` so workers receive the root goal, ancestors, dependencies, and relevant artifacts without unrelated sibling-task chatter. `context_pruning` can also inject local context per task: `include_rag` (retrieved documents, on by default for the researcher), `include_memory` (user/project/session memory), and `include_skills` (the active skill index). Per-role tool scoping is enforced through `agents.roles.<role>.allowedTools`, and a run streams live per-task progress into the chat log while it executes.
 
 The recommended RTX 5090 / 32GB VRAM layout is:
 

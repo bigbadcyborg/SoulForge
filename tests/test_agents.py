@@ -356,3 +356,173 @@ def test_resume_run_requires_resolved_checkpoints(tmp_path) -> None:
     result = manager.resume_run()
     assert result.success is False
     assert "chk_open" in result.message
+
+
+def test_default_roles_carry_allowed_tools(tmp_path) -> None:
+    config = load_config(_write_agent_config(tmp_path))
+    assert config.agents.roles["researcher"].allowed_tools == [
+        "read_file",
+        "list_dir",
+        "search_docs",
+    ]
+    assert "write_file" in config.agents.roles["executor"].allowed_tools
+
+
+def test_allowed_tools_round_trip(tmp_path) -> None:
+    from app.core.config import save_agents
+
+    config = load_config(_write_agent_config(tmp_path))
+    config_path = tmp_path / "config.yaml"
+    config.agents.roles["researcher"].allowed_tools = ["read_file"]
+    save_agents(config, config_path)
+    reloaded = load_config(config_path)
+    assert reloaded.agents.roles["researcher"].allowed_tools == ["read_file"]
+
+
+def test_worker_context_includes_rag_for_researcher(tmp_path) -> None:
+    from app.rag.retriever import RetrievedChunk
+
+    config = load_config(_write_agent_config(tmp_path))
+    runtime = MagicMock()
+
+    class FakeRetriever:
+        def retrieve(self, query, top_k=None):
+            assert "Find facts" in query
+            return [
+                RetrievedChunk(
+                    source="notes.md",
+                    chunk_index=0,
+                    distance=0.1,
+                    document="The sky is blue.",
+                )
+            ]
+
+    manager = AgentManager(
+        config, runtime, retriever_provider=lambda: FakeRetriever()
+    )
+    run = AgentRun(run_id="run_ctx", goal="Learn things")
+    task = AgentTask(
+        id="r1", role="researcher", title="Research", instructions="Find facts"
+    )
+    run.tasks = [task]
+
+    context = manager._context_for_task(run, task)
+    assert "Retrieved documents (RAG)" in context
+    assert "The sky is blue." in context
+
+
+def test_worker_context_skips_rag_for_non_researcher(tmp_path) -> None:
+    config = load_config(_write_agent_config(tmp_path))
+    runtime = MagicMock()
+    called = []
+
+    class FakeRetriever:
+        def retrieve(self, query, top_k=None):
+            called.append(query)
+            return []
+
+    manager = AgentManager(
+        config, runtime, retriever_provider=lambda: FakeRetriever()
+    )
+    run = AgentRun(run_id="run_ctx2", goal="Build things")
+    # creator does not get RAG by default and this task does not opt in.
+    task = AgentTask(
+        id="c1", role="creator", title="Create", instructions="Build it"
+    )
+    run.tasks = [task]
+
+    manager._context_for_task(run, task)
+    assert called == []
+
+
+def test_allowed_tools_blocks_disallowed_tool(tmp_path) -> None:
+    config = load_config(_write_agent_config(tmp_path, tools=True))
+    runtime = MagicMock()
+
+    class FakeExecutor:
+        def __init__(self):
+            self.classified = []
+
+        def classify(self, call):
+            self.classified.append(call.name)
+            raise AssertionError("classify must not run for a blocked tool")
+
+    executor = FakeExecutor()
+    manager = AgentManager(
+        config, runtime, tool_executor_factory=lambda: executor
+    )
+    run = AgentRun(run_id="run_block", goal="x", status="running")
+    # researcher's default allowed_tools excludes write_file.
+    task = AgentTask(id="r1", role="researcher", title="R", instructions="find")
+    run.tasks = [task]
+    env = parse_agent_envelope(
+        _envelope(
+            role="researcher",
+            run_id=run.run_id,
+            task_id="r1",
+            status="tool_requested",
+            tool_requests=[{"name": "write_file", "args": {"path": "x", "content": "y"}}],
+        )
+    )
+    result = env.to_result()
+    paused = manager._process_tool_requests(run, task, env.tool_requests, result)
+    assert paused is False
+    assert run.checkpoints == []
+    assert executor.classified == []
+    assert any("not allowed for role 'researcher'" in err for err in result.errors)
+
+
+def test_start_run_emits_progress(tmp_path) -> None:
+    config = load_config(_write_agent_config(tmp_path))
+    runtime = MagicMock()
+    runtime.warm_resident_profiles.return_value = []
+
+    def completion(profile, messages, stream=False):
+        if profile == "orchestrator":
+            return _envelope(
+                role="orchestrator",
+                run_id=manager.active_run_id,
+                task_id="plan",
+                artifacts=[
+                    {
+                        "type": "task_graph",
+                        "tasks": [
+                            {
+                                "id": "draft",
+                                "role": "creator",
+                                "title": "Draft",
+                                "instructions": "Draft answer",
+                            }
+                        ],
+                    }
+                ],
+            )
+        if profile == "creator":
+            if "task_id 'final'" in messages[-1]["content"]:
+                return _envelope(
+                    role="synthesizer",
+                    run_id=manager.active_run_id,
+                    task_id="final",
+                    summary="final",
+                )
+            return _envelope(
+                role="creator",
+                run_id=manager.active_run_id,
+                task_id="draft",
+                summary="draft",
+            )
+        return _envelope(
+            role="critic", run_id=manager.active_run_id, task_id="critic"
+        )
+
+    runtime.create_chat_completion_for_profile.side_effect = completion
+    manager = AgentManager(config, runtime)
+    lines: list[str] = []
+    result = manager.start_run("Write something", on_progress=lines.append)
+    assert result.success is True
+    joined = "\n".join(lines)
+    assert "planning task graph" in joined
+    assert any("creator/draft" in line for line in lines)
+    assert "run completed" in joined
+    # Callback is cleared after the run.
+    assert manager.on_progress is None
