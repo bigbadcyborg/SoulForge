@@ -1,6 +1,7 @@
 # Python / WSL virtual envs
 .venv/
 .venv-wsl/
+.venv-gui/
 venv/
 __pycache__/
 *.pyc

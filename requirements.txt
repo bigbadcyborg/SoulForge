@@ -12,3 +12,12 @@ pypdf>=4.0,<6.0
 pdf2image>=1.17,<2.0
 pytesseract>=0.3.10,<0.4
 Pillow>=10.0,<12.0
+
+# Local API server (WSL) for the desktop GUI front end.
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29,<1.0
+python-multipart>=0.0.9,<1.0
+websockets>=12.0,<16.0
+
+# Audio transcription for the GUI's push-to-talk hotkey (runs on the WSL GPU).
+faster-whisper>=1.0,<2.0

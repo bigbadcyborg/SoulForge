@@ -39,6 +39,7 @@ class ModelRuntime:
         self._chat_profiles: dict[str, "Llama"] = {}
         self._profile_paths: dict[str, Path] = {}
         self._embedder: "Llama | None" = None
+        self._vision: "Llama | None" = None
         self._compute_backend: ComputeBackend = UNKNOWN
         self._lock = threading.RLock()
         self._active_profile: str = ""
@@ -159,6 +160,98 @@ class ModelRuntime:
             embedder = self._load_embedding_model_unlocked()
             result = embedder.create_embedding(text)
             return result["data"][0]["embedding"]
+
+    # -- vision (multimodal) --------------------------------------------
+
+    def unload_vision_model(self) -> None:
+        """Release the loaded vision model, if any."""
+        with self._lock:
+            self._vision = None
+        gc.collect()
+
+    def create_vision_completion(self, image_bytes: bytes, prompt: str) -> str:
+        """Describe/answer about an image using the configured vision model.
+
+        Raises ``RuntimeError`` if no vision model is configured. The image is
+        passed as a base64 data URI content part (the OpenAI-vision message
+        shape llama-cpp's chat handlers expect).
+        """
+        vision_cfg = self.config.vision
+        if not vision_cfg.enabled:
+            raise RuntimeError("No vision model configured (set vision.modelPath).")
+
+        import base64
+
+        data_uri = "data:image/png;base64," + base64.b64encode(image_bytes).decode()
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt or "Describe this image."},
+                    {"type": "image_url", "image_url": {"url": data_uri}},
+                ],
+            }
+        ]
+        with self._lock:
+            vision = self._load_vision_unlocked()
+            response = vision.create_chat_completion(
+                messages=messages,
+                max_tokens=vision_cfg.max_tokens,
+            )
+        return response["choices"][0]["message"]["content"].strip()
+
+    def _load_vision_unlocked(self) -> "Llama":
+        if self._vision is not None:
+            return self._vision
+
+        vision_cfg = self.config.vision
+        model_path = vision_cfg.model
+        mmproj_path = vision_cfg.mmproj
+        if model_path is None or not model_path.exists():
+            raise FileNotFoundError(
+                f"Vision model not found: {model_path}. Check vision.modelPath."
+            )
+        if mmproj_path is None or not mmproj_path.exists():
+            raise FileNotFoundError(
+                f"Vision mmproj not found: {mmproj_path}. Check vision.mmprojPath."
+            )
+
+        # Optionally free the chat model's VRAM first (it reloads on next use).
+        if vision_cfg.evict_chat:
+            self._chat = None
+            self._chat_profiles.clear()
+            self._profile_paths.clear()
+            self._active_profile = ""
+            gc.collect()
+
+        from llama_cpp import Llama
+
+        handler = self._build_vision_handler(str(mmproj_path))
+        print(f"Loading vision model '{model_path.name}'...")
+        self._vision = Llama(
+            model_path=str(model_path),
+            chat_handler=handler,
+            n_ctx=vision_cfg.context_size,
+            n_gpu_layers=self.config.model.gpu_layers,
+            verbose=False,
+        )
+        return self._vision
+
+    def _build_vision_handler(self, mmproj_path: str):
+        """Map the config handler name to a llama-cpp chat handler instance."""
+        from llama_cpp import llama_chat_format
+
+        handlers = {
+            "llava-1-5": "Llava15ChatHandler",
+            "llava-1-6": "Llava16ChatHandler",
+            "moondream": "MoondreamChatHandler",
+            "qwen2.5-vl": "Qwen25VLChatHandler",
+        }
+        class_name = handlers.get(self.config.vision.chat_handler, "Llava15ChatHandler")
+        handler_cls = getattr(
+            llama_chat_format, class_name, llama_chat_format.Llava15ChatHandler
+        )
+        return handler_cls(clip_model_path=mmproj_path)
 
     def _completion_params(self, **overrides: Any) -> dict[str, Any]:
         gen = self.config.generation

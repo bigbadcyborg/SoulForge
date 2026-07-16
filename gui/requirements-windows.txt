@@ -1,0 +1,21 @@
+# SoulForge desktop GUI — install in a NATIVE WINDOWS Python venv (not WSL).
+# The GUI captures screen/audio/hotkeys on the Windows host and talks to the
+# WSL API server over localhost. All model inference stays in WSL.
+
+PySide6>=6.6,<7.0
+httpx>=0.27,<1.0
+websockets>=12.0,<16.0
+
+# Screen snapshot capture.
+mss>=9.0,<10.0
+Pillow>=10.0,<12.0
+
+# Microphone capture for push-to-talk transcription.
+sounddevice>=0.4,<1.0
+soundfile>=0.12,<1.0
+numpy>=1.26,<3.0
+
+# Global hotkeys. `keyboard` needs admin on some systems; pynput is the
+# fallback used by gui/hotkeys.py if `keyboard` is unavailable.
+keyboard>=0.13,<1.0
+pynput>=1.7,<2.0

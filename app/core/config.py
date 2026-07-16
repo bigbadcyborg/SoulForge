@@ -312,6 +312,63 @@ class OnboardingConfig:
 
 
 @dataclass
+class ServerConfig:
+    """Local API server used by the desktop GUI front end."""
+
+    host: str = "127.0.0.1"
+    port: int = 8765
+    # Shared secret sent as the ``X-SoulForge-Token`` header. Empty disables the
+    # check (fine for single-user localhost). WSL2 forwards localhost to the
+    # Windows host, so keep the bind on the loopback interface.
+    auth_token: str = ""
+
+
+@dataclass
+class VisionConfig:
+    """Optional multimodal model for the GUI's screen-snapshot feature.
+
+    Requires a vision GGUF plus its mmproj (CLIP projector) file. Loaded on
+    demand by ``ModelRuntime``; empty ``model_path`` disables the feature (the
+    snapshot endpoint then falls back to OCR).
+    """
+
+    model_path: str = ""
+    mmproj_path: str = ""
+    chat_handler: str = "llava-1-5"  # llava-1-5 | llava-1-6 | moondream | qwen2.5-vl
+    context_size: int = 4096
+    max_tokens: int = 512
+    # Free the chat model's VRAM before loading the vision model. Safer on tight
+    # budgets (the chat model reloads on the next message); costs a reload.
+    evict_chat: bool = False
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.model_path)
+
+    @property
+    def model(self) -> Path | None:
+        return resolve_path(self.model_path) if self.model_path else None
+
+    @property
+    def mmproj(self) -> Path | None:
+        return resolve_path(self.mmproj_path) if self.mmproj_path else None
+
+
+@dataclass
+class TranscriptionConfig:
+    """faster-whisper settings for the GUI's push-to-talk hotkey.
+
+    Runs on the WSL GPU alongside the chat model. ``model_size`` accepts any
+    faster-whisper size (tiny/base/small/medium/large-v3) or a local path.
+    """
+
+    model_size: str = "small"
+    device: str = "cuda"  # cuda | cpu
+    compute_type: str = "float16"  # float16 | int8_float16 | int8
+    language: str = ""  # "" = autodetect
+
+
+@dataclass
 class AppConfig:
     model: ModelConfig
     generation: GenerationConfig
@@ -326,6 +383,9 @@ class AppConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     onboarding: OnboardingConfig = field(default_factory=OnboardingConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
+    vision: VisionConfig = field(default_factory=VisionConfig)
+    transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -511,6 +571,31 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         completed=onboarding_section.get("completed", False),
     )
 
+    server_section = _section(data, "server")
+    server = ServerConfig(
+        host=server_section.get("host", "127.0.0.1"),
+        port=server_section.get("port", 8765),
+        auth_token=server_section.get("authToken", ""),
+    )
+
+    vision_section = _section(data, "vision")
+    vision = VisionConfig(
+        model_path=vision_section.get("modelPath", ""),
+        mmproj_path=vision_section.get("mmprojPath", ""),
+        chat_handler=vision_section.get("chatHandler", "llava-1-5"),
+        context_size=vision_section.get("contextSize", 4096),
+        max_tokens=vision_section.get("maxTokens", 512),
+        evict_chat=vision_section.get("evictChat", False),
+    )
+
+    transcription_section = _section(data, "transcription")
+    transcription = TranscriptionConfig(
+        model_size=transcription_section.get("modelSize", "small"),
+        device=transcription_section.get("device", "cuda"),
+        compute_type=transcription_section.get("computeType", "float16"),
+        language=transcription_section.get("language", ""),
+    )
+
     return AppConfig(
         model=model,
         generation=generation,
@@ -525,6 +610,9 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         logging=logging_cfg,
         tools=tools_cfg,
         onboarding=onboarding,
+        server=server,
+        vision=vision,
+        transcription=transcription,
         raw=data,
     )
 

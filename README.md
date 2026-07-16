@@ -17,6 +17,7 @@ This project is designed to run locally (Windows/WSL) with CUDA acceleration for
 * **Tools Workshop**: Open `/tools` (or `/tool`) in TUI to add shell allowlist entries and run manual tool tests with visible output.
 * **Sandboxed Network Tool**: An opt-in `fetch_url` tool does HTTP GETs of allowlisted domains only, blocking private/loopback addresses with a size cap.
 * **Opt-in Multi-Agent Workflows**: Use `/agents run <goal>` to let a local Orchestrator create a strict-JSON task graph and delegate scoped work to Researcher, Creator, Executor, Critic, and Synthesizer roles — with live per-task progress, per-role tool scoping, and optional RAG/memory/skill context per task.
+* **Desktop GUI + Hotkeys**: An optional native Windows GUI (PySide6) whose buttons drive the same commands over a WSL API server, with a screen-snapshot hotkey (vision model) and a push-to-talk transcription hotkey (faster-whisper).
 * **WSL 2 & CUDA support**: Optimized for NVIDIA GPUs (including Blackwell/RTX 5090) within WSL Ubuntu.
 * **Persona Hot-Reload**: Update `SOUL.md` and reload the character instantly with `/reload-soul`.
 * **Compute Indicator**: Status bar shows **GPU** or **CPU** after the model loads.
@@ -431,6 +432,67 @@ chat model. Use `/models profile <profile> <model>` only when you want every
 role mapped to that shared profile to change together.
 
 The 70B Orchestrator profile is expected to exceed the 32GB VRAM budget and spill into system memory. Planning phases can therefore generate more slowly than worker phases. If resident 32B + 8B loading fails, SoulForge falls back to sequential hot-swapping.
+
+## Desktop GUI (Windows) + hotkeys
+
+SoulForge has three front ends over the same `ChatController`:
+
+* **TUI** — `python -m app.main` (default), the Textual terminal UI.
+* **CLI** — `python -m app.main --cli`, a plain terminal loop.
+* **GUI** — a native Windows PySide6 app whose buttons call the same commands.
+
+Because the model runs inside WSL but global hotkeys, screen capture, and the
+microphone are Windows-host features, the GUI is a **thin Windows client** that
+talks to an API server running in WSL. All inference (chat, vision, speech)
+stays on the WSL GPU.
+
+```
+Windows GUI  ──HTTP/WebSocket (localhost)──▶  WSL API server  ──▶  model / vision / whisper
+```
+
+### Setup and launch
+
+1. **WSL (once):** the server deps are in `requirements.txt` (`fastapi`,
+   `uvicorn`, `faster-whisper`, …). Re-run `./setup.sh` or
+   `pip install -r requirements.txt` in `.venv-wsl`.
+2. **Windows (once):** `powershell -ExecutionPolicy Bypass -File .\install-gui-windows.ps1`
+   creates a native Windows venv (`.venv-gui`) and installs
+   `gui/requirements-windows.txt` (PySide6, mss, sounddevice, faster-whisper
+   client deps, hotkey libs).
+3. **Run:** `powershell -ExecutionPolicy Bypass -File .\start-gui-windows.ps1`
+   starts the WSL API server (`python -m app.server`), waits for the model to
+   load, then launches the GUI. You can also run the server by hand in WSL with
+   `./start-server.sh`.
+
+The server binds to `127.0.0.1:8765` (configurable under `server:` in
+`config.yaml`; set `authToken` and the matching `SOULFORGE_TOKEN` env var to
+require a shared secret).
+
+### Snapshot hotkey (vision)
+
+Press **Ctrl+Alt+S** (configurable) to drag-select a screen region. The capture
+is sent to a local multimodal model and its answer appears in the chat. Configure
+a vision GGUF + mmproj under `vision:` in `config.yaml`:
+
+```yaml
+vision:
+  modelPath: ./models/vision/llava-v1.6-mistral-7b.Q4_K_M.gguf
+  mmprojPath: ./models/vision/mmproj-model-f16.gguf
+  chatHandler: llava-1-6
+```
+
+Vision shares the GPU with the 12B chat model; on a tight VRAM budget set
+`evictChat: true` to free the chat model while the snapshot is processed (it
+reloads on the next message). If no vision model is configured, the snapshot
+endpoint reports that OCR (via the existing `pytesseract` ingestion path) is the
+fallback.
+
+### Transcribe hotkey (speech-to-text)
+
+Press **Ctrl+Alt+A** (configurable) to start recording; press it again to stop.
+The clip is transcribed by faster-whisper on the WSL GPU and the text is dropped
+into the input box for review before you send it. Tune under `transcription:` in
+`config.yaml` (`modelSize`, `device`, `language`).
 
 ## Doctor script
 

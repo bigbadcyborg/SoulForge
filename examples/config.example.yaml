@@ -136,3 +136,30 @@ tools:
 
 onboarding:
   completed: false
+
+# Local API server used by the desktop GUI (python -m app.server, runs in WSL).
+# The GUI connects over localhost; WSL2 forwards it to the Windows host.
+server:
+  host: 127.0.0.1
+  port: 8765
+  # Optional shared secret. Set the same value in SOULFORGE_TOKEN on the GUI
+  # side. Empty = no auth (fine for single-user localhost).
+  authToken: ""
+
+# Optional multimodal model for the GUI's screen-snapshot feature. Supply a
+# vision GGUF plus its mmproj (CLIP projector). Empty modelPath = OCR fallback.
+vision:
+  modelPath: ""        # e.g. ./models/vision/llava-v1.6-mistral-7b.Q4_K_M.gguf
+  mmprojPath: ""       # e.g. ./models/vision/mmproj-model-f16.gguf
+  chatHandler: llava-1-5   # llava-1-5 | llava-1-6 | moondream | qwen2.5-vl
+  contextSize: 4096
+  maxTokens: 512
+  # Free the chat model's VRAM before loading vision (it reloads afterwards).
+  evictChat: false
+
+# Speech-to-text for the GUI's push-to-talk hotkey (faster-whisper, WSL GPU).
+transcription:
+  modelSize: small     # tiny | base | small | medium | large-v3 | <path>
+  device: cuda         # cuda | cpu
+  computeType: float16 # float16 | int8_float16 | int8
+  language: ""         # "" autodetects

@@ -1173,6 +1173,34 @@ tools, show progress live, and give the tool harness sandboxed web access.
 
 ---
 
+## Iteration 17: Desktop GUI + Snapshot/Transcribe Hotkeys
+
+### Objective
+
+Add a native Windows PySide6 GUI whose buttons drive the same commands as the
+TUI, backed by a local API server in WSL, plus two OS-level hotkey features: a
+screen-snapshot fed to a vision model and push-to-talk transcription.
+
+### Deliverables
+
+* `app/core/command_router.py` — front-end-neutral command dispatch.
+* `app/server/` — FastAPI app: `/api/command`, `/ws/chat` streaming,
+  `/api/snapshot`, `/api/transcribe`; `python -m app.server` entry.
+* Vision support in `model_runtime.py` (`create_vision_completion`) + `vision:`
+  config; faster-whisper in `app/server/transcribe.py` + `transcription:` config.
+* `gui/` — PySide6 client (chat + command buttons), global hotkeys, region
+  snapshot capture, mic recording; `gui/requirements-windows.txt`.
+* Launchers: `start-server.sh`, `start-gui-windows.ps1`, `install-gui-windows.ps1`.
+
+### Acceptance Criteria
+
+* GUI buttons and streamed chat produce the same results as the TUI.
+* Snapshot hotkey drag-selects a region, and a vision model answers about it.
+* Transcribe hotkey records mic audio and inserts the recognized text.
+* TUI/CLI keep working unchanged; the server binds to localhost.
+
+---
+
 ## 9. Suggested Commands
 
 ### Core Commands
@@ -1467,6 +1495,11 @@ Opt-in multi-agent orchestration with local model profiles.
 
 Agent local-context injection, per-role tool scoping, live run progress, and a
 sandboxed network tool.
+
+### v1.6
+
+Native Windows desktop GUI over a WSL API server, with screen-snapshot vision
+and push-to-talk transcription hotkeys.
 
 ---
 
