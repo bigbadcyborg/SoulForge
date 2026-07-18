@@ -8,7 +8,7 @@ replies arrive via ChatStreamWorker signals. Requires PySide6 (Windows venv).
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QTextCursor, QTextOption
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -78,6 +78,10 @@ class ChatWindow(QMainWindow):
         # Left: transcript + input
         left = QVBoxLayout()
         self.transcript = QTextEdit(readOnly=True)
+        # Wrap long lines (and long unbroken tokens) to the widget width so the
+        # transcript never overflows horizontally when the window is narrow.
+        self.transcript.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.transcript.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.status_label = QLabel("⏳ Loading model — please wait…")
         self.status_label.setStyleSheet("font-weight: bold;")
         input_row = QHBoxLayout()
@@ -213,9 +217,13 @@ class ChatWindow(QMainWindow):
 
     def _on_typed_command_result(self, name: str, result: dict) -> None:
         text = result.get("text", "") or "(no output)"
-        # Preserve whitespace/newlines from command output in the transcript.
+        # pre-wrap keeps command whitespace/newlines but still wraps long lines
+        # (a plain <pre> would overflow horizontally on a narrow window).
         self.transcript.append(f"<b>/{name}:</b>")
-        self.transcript.append(f"<pre>{_escape_html(text)}</pre>")
+        self.transcript.append(
+            f'<div style="white-space: pre-wrap; font-family: monospace;">'
+            f"{_escape_html(text)}</div>"
+        )
         self._scroll_to_end()
         if name in ("features", "model", "models", "rag", "reload-soul"):
             self._refresh_status()
@@ -261,24 +269,26 @@ class ChatWindow(QMainWindow):
     # -- snapshot (Phase 2) ----------------------------------------------
 
     def trigger_snapshot(self) -> None:
+        # Hide the app window first, then grab the screen after it has settled so
+        # SoulForge's own window is never part of the capture.
+        self.hide()
+        QTimer.singleShot(200, self._launch_region_selector)
+
+    def _launch_region_selector(self) -> None:
         from gui.snapshot import RegionSelector
 
-        self.hide()  # keep the app window out of the capture
         selector = RegionSelector()
         selector.region_selected.connect(self._on_region_selected)
         selector.cancelled.connect(self.show)
         self._region_selector = selector  # keep a reference
         selector.show()
+        selector.raise_()
+        selector.activateWindow()
 
-    def _on_region_selected(self, left: int, top: int, width: int, height: int) -> None:
-        from gui.snapshot import SnapshotWorker, capture_region_png
+    def _on_region_selected(self, png: bytes) -> None:
+        from gui.snapshot import SnapshotWorker
 
         self.show()
-        try:
-            png = capture_region_png(left, top, width, height)
-        except Exception as error:  # noqa: BLE001
-            self._show_result("snapshot", f"Capture failed: {error}")
-            return
         prompt, ok = QInputDialog.getText(
             self, "Snapshot", "Ask about the capture (blank = describe):"
         )
