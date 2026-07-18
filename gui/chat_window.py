@@ -36,6 +36,7 @@ def _escape_html(text: str) -> str:
 # Command buttons: (label, command name, prompt-for-args?). A prompt lets the
 # user supply the sub-command/argument (e.g. "run <goal>", "load <id>").
 COMMAND_BUTTONS = [
+    ("Help", "help", False),
     ("Health", "health", False),
     ("Features", "features", True),
     ("Model", "model", True),
@@ -55,6 +56,7 @@ class ChatWindow(QMainWindow):
         self._workers: list = []  # keep QThread refs alive
         self._assistant_anchor: int | None = None
 
+        self._was_ready = False
         self.setWindowTitle("SoulForge")
         self.resize(900, 640)
         self._build_ui()
@@ -76,12 +78,15 @@ class ChatWindow(QMainWindow):
         # Left: transcript + input
         left = QVBoxLayout()
         self.transcript = QTextEdit(readOnly=True)
-        self.status_label = QLabel("Connecting...")
+        self.status_label = QLabel("⏳ Loading model — please wait…")
+        self.status_label.setStyleSheet("font-weight: bold;")
         input_row = QHBoxLayout()
         self.input = QLineEdit()
-        self.input.setPlaceholderText("Type a message and press Enter")
+        self.input.setEnabled(False)
+        self.input.setPlaceholderText("Loading model, please wait…")
         self.input.returnPressed.connect(self._send_message)
         self.send_btn = QPushButton("Send")
+        self.send_btn.setEnabled(False)
         self.send_btn.clicked.connect(self._send_message)
         input_row.addWidget(self.input)
         input_row.addWidget(self.send_btn)
@@ -116,15 +121,23 @@ class ChatWindow(QMainWindow):
         try:
             info = self.client.ping()
             ready = bool(info.get("ready"))
-            self.status_label.setText(
-                f"Model: {info.get('model')} ({info.get('compute_backend')}) — "
-                f"{'ready' if ready else 'loading...'}"
-            )
+            model = info.get("model")
+            if ready:
+                self.status_label.setText(
+                    f"✅ {model} ({info.get('compute_backend')}) — ready"
+                )
+                self.input.setPlaceholderText("Type a message and press Enter")
+                if not self._was_ready:
+                    self._was_ready = True
+                    self._append("System", f"Model ready: {model}")
+            else:
+                self.status_label.setText(f"⏳ Loading model {model} — please wait…")
+                self.input.setPlaceholderText("Loading model, please wait…")
             self.input.setEnabled(ready)
             self.send_btn.setEnabled(ready)
             return ready
         except Exception as error:  # noqa: BLE001
-            self.status_label.setText(f"Server unreachable: {error}")
+            self.status_label.setText(f"⏳ Waiting for server… ({error})")
             self.input.setEnabled(False)
             self.send_btn.setEnabled(False)
             return False
