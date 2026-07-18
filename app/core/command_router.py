@@ -46,9 +46,11 @@ class CommandResult:
         return cls(kind="data", text=text, data=data)
 
     def to_dict(self) -> dict[str, Any]:
+        # Coerce text to a string so a handler that forwards a None-returning
+        # controller method can never break the API response schema.
         return {
             "kind": self.kind,
-            "text": self.text,
+            "text": "" if self.text is None else str(self.text),
             "data": self.data,
             "success": self.success,
         }
@@ -110,7 +112,8 @@ class CommandRouter:
         return CommandResult.message(self.controller.get_config_view())
 
     def _reload_soul(self, args: str) -> CommandResult:
-        return CommandResult.message(self.controller.reload_soul())
+        self.controller.reload_soul()
+        return CommandResult.message("Reloaded persona from SOUL.md.")
 
     # features
     def _features(self, args: str) -> CommandResult:

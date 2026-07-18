@@ -108,6 +108,9 @@ class FakeController:
     def set_feature(self, key: str, enabled: bool) -> None:
         self.features.set_enabled(key, enabled)
 
+    def reload_soul(self) -> None:  # returns None, like the real controller
+        self.reloaded_soul = True
+
     # rag
     def enable_rag(self, sources=None) -> None:
         self.features.set_enabled("rag", True)
@@ -313,6 +316,28 @@ def test_router_tasks_and_skills() -> None:
     router = CommandRouter(FakeController())
     assert "Backlog" in router.dispatch("tasks").text
     assert "demo" in router.dispatch("skills").text
+
+
+def test_reload_soul_returns_string_not_none() -> None:
+    # Regression: reload_soul() returns None; the handler used to forward that
+    # as CommandResult text, which 500'd the API (Pydantic rejects None text).
+    controller = FakeController()
+    result = CommandRouter(controller).dispatch("reload-soul")
+    assert result.kind == "message"
+    assert isinstance(result.text, str) and result.text
+    assert controller.reloaded_soul is True
+
+
+def test_reload_soul_over_http_is_200() -> None:
+    app = create_app(FakeController())
+    client = TestClient(app)
+    r = client.post("/api/command", json={"name": "reload-soul"})
+    assert r.status_code == 200
+    assert r.json()["text"]
+
+
+def test_command_result_coerces_none_text() -> None:
+    assert CommandResult(kind="message", text=None).to_dict()["text"] == ""
 
 
 def test_router_sources_empty() -> None:

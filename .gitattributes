@@ -1,0 +1,6 @@
+# Shell scripts must stay LF even when checked out on Windows — WSL bash fails
+# on CRLF line endings (the shebang becomes "/usr/bin/env bash\r").
+*.sh text eol=lf
+
+# PowerShell launchers are Windows-side; keep them CRLF.
+*.ps1 text eol=crlf
