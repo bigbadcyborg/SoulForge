@@ -60,9 +60,19 @@ class FakeController:
         self.loaded = True
         self.compute_backend = "CPU"
         self.turn_count = 3
-        self.features = FakeFeatures({"streaming": streaming, "show_sources": False})
+        self.features = FakeFeatures(
+            {"streaming": streaming, "show_sources": False, "rag": True}
+        )
         self.runtime = FakeRuntime()
         self.messages: list[dict] = []
+        self.last_retrieved_chunks: list = []
+        self.skill_manager = SimpleNamespace(
+            list_skills=lambda status="active": (
+                [{"name": "demo", "description": "a demo skill"}]
+                if status == "active"
+                else []
+            )
+        )
         self._pending_raw_reply = ""
         self.finalized: list[str] = []
         self.completed = 0
@@ -97,6 +107,30 @@ class FakeController:
 
     def set_feature(self, key: str, enabled: bool) -> None:
         self.features.set_enabled(key, enabled)
+
+    # rag
+    def enable_rag(self, sources=None) -> None:
+        self.features.set_enabled("rag", True)
+
+    def disable_rag(self) -> None:
+        self.features.set_enabled("rag", False)
+
+    def get_rag_status(self) -> dict:
+        return {
+            "enabled": True,
+            "selected_sources": None,
+            "available_sources": ["a.md", "b.md"],
+        }
+
+    def get_rag_stats(self) -> dict:
+        return {"sources": ["a.md", "b.md"], "chunk_count": 42}
+
+    # tasks / sim / sources
+    def get_board_view(self) -> str:
+        return "Backlog: (empty)"
+
+    def run_attack_simulation(self, attack_type: str = "all") -> str:
+        return f"simulation:{attack_type}"
 
 
 @pytest.fixture
@@ -256,6 +290,50 @@ def test_command_result_helpers() -> None:
     assert CommandResult.message("x").kind == "message"
     assert CommandResult.error("x").success is False
     assert CommandResult.structured("x", {"a": 1}).data == {"a": 1}
+
+
+# -- expanded command coverage ------------------------------------------
+
+
+def test_router_rag_status_is_readable() -> None:
+    # Regression: /rag with no args used to return only the label "RAG status".
+    result = CommandRouter(FakeController()).dispatch("rag")
+    assert result.kind == "data"
+    assert "RAG: on" in result.text
+    assert "Indexed chunks: 42" in result.text
+    assert "a.md" in result.text
+    assert "RAG status." != result.text
+
+
+def test_router_rag_on_off() -> None:
+    controller = FakeController()
+    router = CommandRouter(controller)
+    assert router.dispatch("rag", "off").success is True
+    assert controller.features.is_enabled("rag") is False
+
+
+def test_router_tasks_and_sim_and_skills() -> None:
+    router = CommandRouter(FakeController())
+    assert "Backlog" in router.dispatch("tasks").text
+    assert router.dispatch("simulate", "prompt_injection").text == "simulation:prompt_injection"
+    assert "demo" in router.dispatch("skills").text
+
+
+def test_router_sources_empty() -> None:
+    result = CommandRouter(FakeController()).dispatch("sources")
+    assert result.kind == "message"
+    assert result.text  # format_sources_detail returns a friendly no-sources note
+
+
+def test_router_covers_full_command_set() -> None:
+    names = set(CommandRouter(FakeController()).command_names())
+    # A representative sweep across every command group.
+    for expected in [
+        "help", "status", "rag", "ingest", "sources", "memory-review",
+        "skills", "crystallize", "curator", "tasks", "task-new", "agents",
+        "session-save", "tools", "tool-approve", "simulate",
+    ]:
+        assert expected in names
 
 
 # -- config -------------------------------------------------------------

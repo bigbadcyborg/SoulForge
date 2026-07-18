@@ -22,9 +22,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import html
+
 from gui.api_client import ApiClient
 from gui.settings import GuiSettings
 from gui.streaming import ChatStreamWorker, CommandWorker
+
+
+def _escape_html(text: str) -> str:
+    """Escape command output so it renders literally inside a <pre> block."""
+    return html.escape(text)
 
 # Command buttons: (label, command name, prompt-for-args?). A prompt lets the
 # user supply the sub-command/argument (e.g. "run <goal>", "load <id>").
@@ -137,6 +144,11 @@ class ChatWindow(QMainWindow):
         if not text:
             return
         self.input.clear()
+        # A leading slash routes through the same commands as the TUI/CLI.
+        if text.startswith("/"):
+            self._append("You", text)
+            self._send_command(text)
+            return
         self._append("You", text)
         self.input.setEnabled(False)
         self.send_btn.setEnabled(False)
@@ -170,6 +182,34 @@ class ChatWindow(QMainWindow):
         self.input.setFocus()
         if worker in self._workers:
             self._workers.remove(worker)
+
+    def _send_command(self, text: str) -> None:
+        """Dispatch a typed /command through the API and show it in the transcript."""
+        body = text[1:].strip()
+        if not body:
+            return
+        parts = body.split(maxsplit=1)
+        name = parts[0]
+        args = parts[1] if len(parts) > 1 else ""
+        worker = CommandWorker(self.client, name, args)
+        worker.done.connect(lambda result: self._on_typed_command_result(name, result))
+        worker.error.connect(lambda t: self._append("Error", t))
+        worker.finished.connect(lambda: self._drop_worker(worker))
+        self._workers.append(worker)
+        worker.start()
+
+    def _on_typed_command_result(self, name: str, result: dict) -> None:
+        text = result.get("text", "") or "(no output)"
+        # Preserve whitespace/newlines from command output in the transcript.
+        self.transcript.append(f"<b>/{name}:</b>")
+        self.transcript.append(f"<pre>{_escape_html(text)}</pre>")
+        self._scroll_to_end()
+        if name in ("features", "model", "models", "rag", "reload-soul"):
+            self._refresh_status()
+
+    def _scroll_to_end(self) -> None:
+        bar = self.transcript.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
     # -- commands --------------------------------------------------------
 

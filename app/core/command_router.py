@@ -177,6 +177,161 @@ class CommandRouter:
         self.controller.clear_all_memory()
         return CommandResult.message("Cleared all memory sections.")
 
+    def _memory_analysis(self, args: str) -> CommandResult:
+        return CommandResult.message(self.controller.format_memory_analysis(args))
+
+    def _memory_edit(self, args: str) -> CommandResult:
+        section = args.strip().lower()
+        if section not in ("user", "memory", "session"):
+            return CommandResult.error(
+                "Usage: /memory-edit <user|memory|session> (view current content)"
+            )
+        content = self.controller.memory_manager.read_raw(section)
+        return CommandResult.message(content or f"({section} is empty)")
+
+    def _memory_review(self, args: str) -> CommandResult:
+        return CommandResult.message(self.controller.get_memory_review())
+
+    def _memory_accept(self, args: str) -> CommandResult:
+        try:
+            self.controller.accept_memory_suggestion()
+        except ValueError as error:
+            return CommandResult.error(str(error))
+        return CommandResult.message("Memory suggestion saved.")
+
+    def _memory_reject(self, args: str) -> CommandResult:
+        self.controller.reject_memory_suggestion()
+        return CommandResult.message("Memory suggestion discarded.")
+
+    # skills
+    def _skills(self, args: str) -> CommandResult:
+        mgr = self.controller.skill_manager
+        active = mgr.list_skills(status="active")
+        archived = mgr.list_skills(status="archived")
+        lines = ["Active skills:"]
+        lines.extend(
+            f"  - {s.get('name')}: {s.get('description', '')}" for s in active
+        ) if active else lines.append("  (none)")
+        lines.append("Archived skills:")
+        lines.extend(
+            f"  - {s.get('name')}: {s.get('description', '')}" for s in archived
+        ) if archived else lines.append("  (none)")
+        return CommandResult.message("\n".join(lines))
+
+    def _success(self, args: str) -> CommandResult:
+        return CommandResult.message(self.controller.mark_workflow_success(args).message)
+
+    def _crystallize(self, args: str) -> CommandResult:
+        result = self.controller.crystallize_workflow()
+        return CommandResult.message(result.message or "No workflow ready to crystallize.")
+
+    def _skill_accept(self, args: str) -> CommandResult:
+        ok = self.controller.accept_skill_suggestion()
+        return CommandResult.message(
+            "Skill saved." if ok else "No pending skill suggestion."
+        )
+
+    def _skill_reject(self, args: str) -> CommandResult:
+        self.controller.reject_skill_suggestion()
+        return CommandResult.message("Skill suggestion discarded.")
+
+    def _skill_restore(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /skill-restore <name>")
+        return CommandResult.message(self.controller.restore_skill_direct(args).message)
+
+    # curator
+    def _curator(self, args: str) -> CommandResult:
+        result = self.controller.run_curator_review()
+        text = result.message or ""
+        if getattr(result, "has_findings", False):
+            text = (text + "\n\n" + self.controller.get_curator_review()).strip()
+        return CommandResult.message(text or "Curator found nothing to review.")
+
+    def _curator_archive(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /curator-archive <skill name>")
+        return CommandResult.message(self.controller.archive_skill_direct(args).message)
+
+    def _curator_compact(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /curator-compact <skill name>")
+        result = self.controller.compact_skill_direct(args)
+        return CommandResult.message(getattr(result, "message", "Compacted."))
+
+    def _curator_accept(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /curator-accept <finding_id>")
+        return CommandResult.message(self.controller.accept_curator_finding(args).message)
+
+    def _curator_ignore(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /curator-ignore <finding_id>")
+        self.controller.dismiss_curator_finding(args)
+        return CommandResult.message(f"Dismissed curator finding {args}.")
+
+    # tasks
+    def _tasks(self, args: str) -> CommandResult:
+        return CommandResult.message(self.controller.get_board_view())
+
+    def _task_new(self, args: str) -> CommandResult:
+        if not args.strip():
+            return CommandResult.error("Usage: /task-new <title>")
+        return CommandResult.message(self.controller.create_task_direct(args.strip()).message)
+
+    def _task_move(self, args: str) -> CommandResult:
+        parts = args.split()
+        if len(parts) != 2:
+            return CommandResult.error("Usage: /task-move <id> <column>")
+        return CommandResult.message(
+            self.controller.move_task_direct(parts[0], parts[1]).message
+        )
+
+    def _task_done(self, args: str) -> CommandResult:
+        if not args.strip():
+            return CommandResult.error("Usage: /task-done <id>")
+        return CommandResult.message(
+            self.controller.move_task_direct(args.strip(), "done").message
+        )
+
+    def _task_delete(self, args: str) -> CommandResult:
+        if not args.strip():
+            return CommandResult.error("Usage: /task-delete <id>")
+        return CommandResult.message(self.controller.delete_task_direct(args.strip()).message)
+
+    def _task_suggest(self, args: str) -> CommandResult:
+        result = self.controller.run_task_suggest()
+        text = result.message or ""
+        if getattr(result, "has_suggestions", False):
+            text = (text + "\n\n" + self.controller.get_task_suggestions_review()).strip()
+        return CommandResult.message(text or "No task suggestions.")
+
+    def _task_accept(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /task-accept <suggestion_id>")
+        return CommandResult.message(self.controller.accept_task_suggestion(args).message)
+
+    def _task_reject(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /task-reject <suggestion_id>")
+        self.controller.dismiss_task_suggestion(args)
+        return CommandResult.message(f"Rejected task suggestion {args}.")
+
+    # simulation
+    def _simulate(self, args: str) -> CommandResult:
+        return CommandResult.message(self.controller.run_attack_simulation(args or "all"))
+
+    # tool approvals
+    def _tool_approve(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /tool-approve <call_id>")
+        return CommandResult.message(self.controller.approve_tool_call(args).message)
+
+    def _tool_reject(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /tool-reject <call_id>")
+        return CommandResult.message(self.controller.reject_tool_call(args).message)
+
     # rag
     def _rag(self, args: str) -> CommandResult:
         c = self.controller
@@ -187,8 +342,36 @@ class CommandRouter:
         if sub == "off":
             c.disable_rag()
             return CommandResult.message("RAG disabled.")
+        # Readable status (the old handler returned only the label "RAG status").
+        status = c.get_rag_status()
         stats = c.get_rag_stats()
-        return CommandResult.structured("RAG status.", {"rag": stats})
+        available = status.get("available_sources") or []
+        selected = status.get("selected_sources")
+        lines = [
+            f"RAG: {'on' if status.get('enabled') else 'off'}",
+            f"Indexed chunks: {stats.get('chunk_count', 0)}",
+            f"Available sources ({len(available)}):",
+        ]
+        lines.extend(f"  - {s}" for s in available) if available else lines.append(
+            "  (none — run /ingest to index docs/)"
+        )
+        if selected is not None:
+            shown = ", ".join(selected) if selected else "(none)"
+            lines.append(f"Selected sources: {shown}")
+        lines.append("")
+        lines.append("Usage: /rag on | /rag off")
+        return CommandResult.structured("\n".join(lines), {"rag": status, "stats": stats})
+
+    def _ingest(self, args: str) -> CommandResult:
+        result = self.controller.run_ingest()
+        return CommandResult.message(result.summary())
+
+    def _sources(self, args: str) -> CommandResult:
+        from app.rag.retriever import Retriever
+
+        return CommandResult.message(
+            Retriever.format_sources_detail(self.controller.last_retrieved_chunks)
+        )
 
     # sessions
     def _sessions(self, args: str) -> CommandResult:
@@ -209,6 +392,17 @@ class CommandRouter:
         return CommandResult.error(
             "Usage: /sessions list|save|load|delete|summary [arg]"
         )
+
+    def _session_save(self, args: str) -> CommandResult:
+        return CommandResult.message(self.controller.save_session_direct(args).message)
+
+    def _session_load(self, args: str) -> CommandResult:
+        if not args:
+            return CommandResult.error("Usage: /session-load <id>")
+        return CommandResult.message(self.controller.load_session_direct(args).message)
+
+    def _session_summary(self, args: str) -> CommandResult:
+        return CommandResult.message(self.controller.run_session_summary().message)
 
     # agents
     def _agents(self, args: str) -> CommandResult:
@@ -262,6 +456,7 @@ class CommandRouter:
 
 
 _HANDLERS: dict[str, Handler] = {
+    # general
     "help": CommandRouter._help,
     "status": CommandRouter._status,
     "health": CommandRouter._health,
@@ -269,16 +464,60 @@ _HANDLERS: dict[str, Handler] = {
     "config": CommandRouter._config,
     "reload-soul": CommandRouter._reload_soul,
     "features": CommandRouter._features,
+    # model routing
     "model": CommandRouter._model,
     "models": CommandRouter._models,
+    # rag
+    "rag": CommandRouter._rag,
+    "ingest": CommandRouter._ingest,
+    "sources": CommandRouter._sources,
+    # memory
     "memory": CommandRouter._memory,
     "memory-on": CommandRouter._memory_on,
     "memory-off": CommandRouter._memory_off,
     "memory-clear": CommandRouter._memory_clear,
-    "rag": CommandRouter._rag,
+    "memory-analysis": CommandRouter._memory_analysis,
+    "memory-search": CommandRouter._memory_analysis,
+    "memory-edit": CommandRouter._memory_edit,
+    "memory-review": CommandRouter._memory_review,
+    "memory-accept": CommandRouter._memory_accept,
+    "memory-reject": CommandRouter._memory_reject,
+    # skills
+    "skills": CommandRouter._skills,
+    "success": CommandRouter._success,
+    "crystallize": CommandRouter._crystallize,
+    "skill-accept": CommandRouter._skill_accept,
+    "skill-reject": CommandRouter._skill_reject,
+    "skill-restore": CommandRouter._skill_restore,
+    # curator
+    "curator": CommandRouter._curator,
+    "curator-review": CommandRouter._curator,
+    "curator-archive": CommandRouter._curator_archive,
+    "curator-compact": CommandRouter._curator_compact,
+    "curator-accept": CommandRouter._curator_accept,
+    "curator-ignore": CommandRouter._curator_ignore,
+    # tasks
+    "tasks": CommandRouter._tasks,
+    "task-new": CommandRouter._task_new,
+    "task-move": CommandRouter._task_move,
+    "task-done": CommandRouter._task_done,
+    "task-delete": CommandRouter._task_delete,
+    "task-suggest": CommandRouter._task_suggest,
+    "task-accept": CommandRouter._task_accept,
+    "task-reject": CommandRouter._task_reject,
+    # agents
+    "agents": CommandRouter._agents,
+    # sessions
     "sessions": CommandRouter._sessions,
     "session-list": CommandRouter._sessions,
-    "agents": CommandRouter._agents,
+    "session-save": CommandRouter._session_save,
+    "session-load": CommandRouter._session_load,
+    "session-summary": CommandRouter._session_summary,
+    # tools
     "tools": CommandRouter._tools,
     "tools-log": CommandRouter._tools_log,
+    "tool-approve": CommandRouter._tool_approve,
+    "tool-reject": CommandRouter._tool_reject,
+    # simulation
+    "simulate": CommandRouter._simulate,
 }
