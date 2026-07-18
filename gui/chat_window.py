@@ -7,7 +7,7 @@ replies arrive via ChatStreamWorker signals. Requires PySide6 (Windows venv).
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -52,6 +52,13 @@ class ChatWindow(QMainWindow):
         self.resize(900, 640)
         self._build_ui()
         self._refresh_status()
+
+        # Poll until the model finishes loading (the server serves immediately
+        # with ready=false while it loads in the background).
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(2000)
+        self._status_timer.timeout.connect(self._poll_until_ready)
+        self._status_timer.start()
 
     # -- UI construction -------------------------------------------------
 
@@ -98,20 +105,27 @@ class ChatWindow(QMainWindow):
 
     # -- status ----------------------------------------------------------
 
-    def _refresh_status(self) -> None:
+    def _refresh_status(self) -> bool:
         try:
             info = self.client.ping()
-            ready = info.get("ready")
+            ready = bool(info.get("ready"))
             self.status_label.setText(
                 f"Model: {info.get('model')} ({info.get('compute_backend')}) — "
                 f"{'ready' if ready else 'loading...'}"
             )
-            self.input.setEnabled(bool(ready))
-            self.send_btn.setEnabled(bool(ready))
+            self.input.setEnabled(ready)
+            self.send_btn.setEnabled(ready)
+            return ready
         except Exception as error:  # noqa: BLE001
             self.status_label.setText(f"Server unreachable: {error}")
             self.input.setEnabled(False)
             self.send_btn.setEnabled(False)
+            return False
+
+    def _poll_until_ready(self) -> None:
+        if self._refresh_status():
+            self._status_timer.stop()
+            self.input.setFocus()
 
     # -- chat ------------------------------------------------------------
 

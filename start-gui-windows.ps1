@@ -35,18 +35,26 @@ if (Test-Server) {
 } else {
     Write-Host ">>> Starting SoulForge API server in WSL..."
     $wslPath = Convert-ToWslPath -WindowsPath $ProjectRoot
-    Start-Process -WindowStyle Minimized wsl -ArgumentList @(
+    # Keep the window visible so model-load progress and any errors are seen.
+    Start-Process wsl -ArgumentList @(
         "-d", "Ubuntu", "--", "bash", "-lc", "cd '$wslPath' && ./start-server.sh"
     )
 
-    Write-Host ">>> Waiting for the model to load (this can take a minute)..."
+    # The server binds immediately and loads the model in the background, so it
+    # should answer within seconds. The GUI then shows a "loading..." state
+    # until the model is ready.
+    Write-Host ">>> Waiting for the API server to come up..."
     $ready = $false
-    for ($i = 0; $i -lt 120; $i++) {
+    for ($i = 0; $i -lt 30; $i++) {
         if (Test-Server) { $ready = $true; break }
         Start-Sleep -Seconds 2
     }
     if (-not $ready) {
-        Write-Error "Server did not become ready. Check the WSL window for errors."
+        Write-Error @"
+API server did not come up. Check the WSL window for errors. Most likely the
+server dependencies are not installed in the WSL venv. From WSL run:
+  cd $wslPath && .venv-wsl/bin/python -m pip install -r requirements.txt
+"@
         exit 1
     }
 }
