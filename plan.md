@@ -235,7 +235,7 @@ Responsible for:
 ### 5.1 Recommended Project Structure
 
 ```text
-chatbot-uncensored/
+SoulForge/
   app/
     main.py
     tui/
@@ -1159,8 +1159,8 @@ tools, show progress live, and give the tool harness sandboxed web access.
   disallowed tool request is refused before it can run or pause the run.
 * Stream live per-task progress into the TUI/CLI during a run and resume.
 * A `fetch_url` tool: HTTP GET of an allowlisted domain, off by default
-  (`tools.allowNetwork` + `tools.networkAllowlist`), with an SSRF guard that
-  blocks private/loopback addresses, a size cap, and per-hop redirect checks.
+  (`tools.allowNetwork` + `tools.networkAllowlist`), which fetches only public
+  addresses (no private/loopback), with a size cap and per-hop redirect checks.
 
 ### Acceptance Criteria
 

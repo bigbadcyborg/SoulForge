@@ -70,7 +70,7 @@ def test_fetch_url_rejects_non_http_scheme() -> None:
 
 
 def test_fetch_url_rejects_private_ip(monkeypatch) -> None:
-    # Host is allowlisted but resolves to a loopback address (SSRF attempt).
+    # Host is allowlisted but resolves to a loopback address, which is refused.
     monkeypatch.setattr(
         net.socket,
         "getaddrinfo",

@@ -317,10 +317,6 @@ class CommandRouter:
         self.controller.dismiss_task_suggestion(args)
         return CommandResult.message(f"Rejected task suggestion {args}.")
 
-    # simulation
-    def _simulate(self, args: str) -> CommandResult:
-        return CommandResult.message(self.controller.run_attack_simulation(args or "all"))
-
     # tool approvals
     def _tool_approve(self, args: str) -> CommandResult:
         if not args:
@@ -518,6 +514,4 @@ _HANDLERS: dict[str, Handler] = {
     "tools-log": CommandRouter._tools_log,
     "tool-approve": CommandRouter._tool_approve,
     "tool-reject": CommandRouter._tool_reject,
-    # simulation
-    "simulate": CommandRouter._simulate,
 }

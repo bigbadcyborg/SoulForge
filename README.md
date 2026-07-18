@@ -1,4 +1,4 @@
-# SoulForge TUI (Chatbot Uncensored)
+# SoulForge
 
 A local-first, TUI-based chatbot running GGUF models through `llama-cpp-python`. Supports CUDA GPU acceleration, persona control via `SOUL.md`, and interactive, toggleable RAG with ChromaDB.
 
@@ -54,7 +54,7 @@ Type `/help` in the TUI or CLI for the full list with descriptions. Key commands
 ## Project Structure
 
 ```text
-chatbot-uncensored/
+SoulForge/
   app/                      # Core application package
     core/                   # Logic, config, and model runtime
     memory/                 # Persistent memory management
@@ -142,7 +142,7 @@ sudo apt install -y python3 python3-pip python3-venv build-essential cmake ninja
 From the project folder:
 
 ```bash
-cd /mnt/c/Users/sully/Documents/projects/chatbot-uncensored
+cd /mnt/c/Users/sully/Documents/projects/SoulForge
 python3 -m venv .venv-wsl
 source .venv-wsl/bin/activate
 python -m pip install --upgrade pip setuptools wheel
@@ -180,7 +180,7 @@ Expected `nvcc` path:
 For RTX 5090 / compute capability 12.0, build from source:
 
 ```bash
-cd /mnt/c/Users/sully/Documents/projects/chatbot-uncensored
+cd /mnt/c/Users/sully/Documents/projects/SoulForge
 source .venv-wsl/bin/activate
 
 pip uninstall -y llama-cpp-python
@@ -544,7 +544,7 @@ cp examples/skills/example_skill.md app/skills/active/example_skill.md
 Create `start-chatbot-windows.ps1`:
 
 ```powershell
-wsl -d Ubuntu -- bash -lc "cd /mnt/c/Users/sully/Documents/projects/chatbot-uncensored && ./start-chatbot.sh"
+wsl -d Ubuntu -- bash -lc "cd /mnt/c/Users/sully/Documents/projects/SoulForge && ./start-chatbot.sh"
 ```
 
 Run it from PowerShell:
@@ -560,7 +560,7 @@ Create `start-chatbot.sh`:
 ```bash
 #!/usr/bin/env bash
 
-cd /mnt/c/Users/sully/Documents/projects/chatbot-uncensored || exit 1
+cd /mnt/c/Users/sully/Documents/projects/SoulForge || exit 1
 
 export CUDA_HOME=/usr/local/cuda-12.9
 export CUDAToolkit_ROOT=/usr/local/cuda-12.9

@@ -68,11 +68,6 @@ from app.skills.skill_crystallizer import (
     generate_suggestion as generate_skill_suggestion,
     resolve_unique_name,
 )
-from app.skills.simulator import (
-    available_simulations,
-    format_simulation_report,
-    run_simulation,
-)
 from app.skills.skill_manager import SkillManager
 from app.skills.workflow_observer import WorkflowMarkResult, WorkflowObserver
 from app.sessions.session_manager import SessionManager
@@ -1927,21 +1922,6 @@ class ChatController:
             "generate more slowly during graph planning."
         )
         return "\n".join(lines)
-
-    def run_attack_simulation(self, attack_type: str = "all") -> str:
-        """Run built-in red-team simulation payloads without mutating chat history."""
-        if attack_type.strip().lower() in ("", "list"):
-            return (
-                "Available simulations:\n  "
-                + "\n  ".join(available_simulations())
-                + "\n  all"
-            )
-        result = run_simulation(
-            self.runtime,
-            system_prompt=self._build_system_prompt(),
-            attack_type=attack_type,
-        )
-        return format_simulation_report(result)
 
     def add_shell_allowlist_entry(self, command: str) -> str:
         command = command.strip()

@@ -4,7 +4,7 @@ A single read-only HTTP GET tool with a deny-by-default sandbox:
 
 * only ``http``/``https`` URLs,
 * host must be on ``tools.networkAllowlist`` (checked in permissions),
-* the resolved IP must be public (no loopback/private/link-local — SSRF guard),
+* the resolved IP must be public (no loopback/private/link-local addresses),
 * hard timeout and response-size cap,
 * redirects are re-validated against the same rules.
 """
@@ -28,8 +28,8 @@ _MAX_REDIRECTS = 3
 class _NoAutoRedirect(HTTPRedirectHandler):
     """Return 3xx responses instead of silently following them.
 
-    Automatic redirects would bypass the per-hop allowlist + SSRF checks, so we
-    handle each redirect manually.
+    Automatic redirects would bypass the per-hop allowlist and public-IP checks,
+    so we handle each redirect manually.
     """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
@@ -70,7 +70,7 @@ def _validate_url(config: AppConfig, url: str) -> str:
         raise PermissionError("fetch_url only supports http/https URLs")
     host = parsed.hostname or ""
     check_network_host(config, host)  # allowlist + allowNetwork gate
-    _assert_public_host(host)  # SSRF guard
+    _assert_public_host(host)  # only allow public addresses
     return url
 
 

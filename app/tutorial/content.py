@@ -28,7 +28,7 @@ TUTORIAL_STEPS: tuple[TutorialStep, ...] = (
         id="welcome",
         title="Welcome to SoulForge",
         body=(
-            "SoulForge is your local, uncensored AI workshop — persona, memory, "
+            "SoulForge is your local, private AI workshop — persona, memory, "
             "documents, skills, tasks, and tools, all running on your machine.\n\n"
             "This quest walkthrough introduces the essentials. Nothing here changes "
             "your setup automatically; try commands in the chat when you're ready.\n\n"

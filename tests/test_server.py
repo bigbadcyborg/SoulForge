@@ -125,12 +125,9 @@ class FakeController:
     def get_rag_stats(self) -> dict:
         return {"sources": ["a.md", "b.md"], "chunk_count": 42}
 
-    # tasks / sim / sources
+    # tasks / sources
     def get_board_view(self) -> str:
         return "Backlog: (empty)"
-
-    def run_attack_simulation(self, attack_type: str = "all") -> str:
-        return f"simulation:{attack_type}"
 
 
 @pytest.fixture
@@ -312,10 +309,9 @@ def test_router_rag_on_off() -> None:
     assert controller.features.is_enabled("rag") is False
 
 
-def test_router_tasks_and_sim_and_skills() -> None:
+def test_router_tasks_and_skills() -> None:
     router = CommandRouter(FakeController())
     assert "Backlog" in router.dispatch("tasks").text
-    assert router.dispatch("simulate", "prompt_injection").text == "simulation:prompt_injection"
     assert "demo" in router.dispatch("skills").text
 
 
@@ -331,7 +327,7 @@ def test_router_covers_full_command_set() -> None:
     for expected in [
         "help", "status", "rag", "ingest", "sources", "memory-review",
         "skills", "crystallize", "curator", "tasks", "task-new", "agents",
-        "session-save", "tools", "tool-approve", "simulate",
+        "session-save", "tools", "tool-approve",
     ]:
         assert expected in names
 

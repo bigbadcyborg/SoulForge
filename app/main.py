@@ -603,13 +603,6 @@ def _handle_task_reject_cli(controller: ChatController, args: str) -> None:
     print("Task suggestion rejected.")
 
 
-def _handle_simulate_cli(controller: ChatController, args: str) -> None:
-    try:
-        print(controller.run_attack_simulation(args.strip() or "list"))
-    except Exception as error:  # noqa: BLE001
-        print(f"Simulation failed: {error}")
-
-
 def _handle_session_list_cli(controller: ChatController) -> None:
     print(controller.list_sessions_view())
 
@@ -826,8 +819,6 @@ def _handle_cli_command(controller: ChatController, cmd: str) -> bool:
         _handle_tools_cli(controller, args)
     elif command == "/tools-log":
         print(controller.get_tool_log_view())
-    elif command == "/simulate":
-        _handle_simulate_cli(controller, args)
     elif command == "/tool-approve":
         call_id = args.strip()
         if not call_id:

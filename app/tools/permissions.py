@@ -70,8 +70,8 @@ def check_network_host(config: AppConfig, host: str) -> str:
     """Validate a request host against allowNetwork + the domain allowlist.
 
     Returns the lowercased host. Raises PermissionError when networking is
-    disabled or the host is not on the allowlist. IP-level SSRF checks live in
-    the handler, which resolves the host after this passes.
+    disabled or the host is not on the allowlist. Public-IP checks live in the
+    handler, which resolves the host after this passes.
     """
     if not config.tools.allow_network:
         raise PermissionError("fetch_url disabled (tools.allowNetwork: false)")

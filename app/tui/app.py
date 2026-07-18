@@ -240,20 +240,6 @@ class SoulForgeApp(App):
             return
         self.call_from_thread(self._on_model_import_complete, message, switch_after)
 
-    @work(thread=True, exclusive=True, group="model")
-    def _run_simulation(self, attack_type: str) -> None:
-        try:
-            report = self.controller.run_attack_simulation(attack_type)
-        except Exception as error:  # noqa: BLE001
-            self.call_from_thread(
-                self._write_message,
-                "system",
-                f"Simulation failed: {error}",
-            )
-            self.call_from_thread(self._simulation_done)
-            return
-        self.call_from_thread(self._write_message, "system", report)
-        self.call_from_thread(self._simulation_done)
 
     def _agent_progress(self, line: str) -> None:
         """Stream a per-task progress line into the chat log (called off-thread)."""
@@ -353,12 +339,6 @@ class SoulForgeApp(App):
         )
 
     def _generation_done(self) -> None:
-        self.status_bar.set_state("Ready")
-        self.prompt.disabled = False
-        self.prompt.focus()
-        self._scroll_to_end()
-
-    def _simulation_done(self) -> None:
         self.status_bar.set_state("Ready")
         self.prompt.disabled = False
         self.prompt.focus()
@@ -664,17 +644,6 @@ class SoulForgeApp(App):
         self._begin_model_job("Importing model...")
         self._import_model(source, switch_after=switch_after)
 
-    def _handle_simulate_command(self, args: str) -> None:
-        if not self.models_ready:
-            self._write_message("system", "Model is still loading, please wait.")
-            return
-        attack_type = args.strip() or "list"
-        if attack_type.lower() == "list":
-            self._write_message("system", self.controller.run_attack_simulation("list"))
-            return
-        self.status_bar.set_state("Running simulation...")
-        self.prompt.disabled = True
-        self._run_simulation(attack_type)
 
     def _handle_agents_command(self, args: str) -> None:
         stripped = args.strip()
@@ -1702,8 +1671,6 @@ class SoulForgeApp(App):
             self._handle_tools_command(args)
         elif command == "/tools-log":
             self._handle_tools_log_command()
-        elif command == "/simulate":
-            self._handle_simulate_command(args)
         elif command == "/tool-approve":
             self._handle_tool_approve_command(args)
         elif command == "/tool-reject":

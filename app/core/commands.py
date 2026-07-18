@@ -124,11 +124,6 @@ COMMANDS: tuple[CommandHelp, ...] = (
         "Show recent tool call audit log entries",
     ),
     CommandHelp(
-        "Testing",
-        "/simulate [type|list|all]",
-        "Run built-in red-team simulation payloads and show pass/fail results",
-    ),
-    CommandHelp(
         "Tools",
         "/tool-approve <id>",
         "Approve and execute a pending tool call (CLI)",
