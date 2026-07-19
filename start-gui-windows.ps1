@@ -35,9 +35,12 @@ if (Test-Server) {
 } else {
     Write-Host ">>> Starting SoulForge API server in WSL..."
     $wslPath = Convert-ToWslPath -WindowsPath $ProjectRoot
-    # Keep the window visible so model-load progress and any errors are seen.
+    # --defer-load: the GUI's startup dialog chooses which models to load, so the
+    # server waits instead of eagerly loading the default. Keep the window
+    # visible so model-load progress and any errors are seen.
     Start-Process wsl -ArgumentList @(
-        "-d", "Ubuntu", "--", "bash", "-lc", "cd '$wslPath' && ./start-server.sh"
+        "-d", "Ubuntu", "--", "bash", "-lc",
+        "cd '$wslPath' && ./start-server.sh --defer-load"
     )
 
     # The server binds immediately and loads the model in the background, so it

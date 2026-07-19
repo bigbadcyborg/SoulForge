@@ -36,10 +36,19 @@ class FakeFeatures:
 class FakeRuntime:
     def __init__(self) -> None:
         self.calls: list[tuple[bytes, str]] = []
+        self.warmed = False
+        self.vision_loaded = False
 
     def create_vision_completion(self, image_bytes: bytes, prompt: str) -> str:
         self.calls.append((image_bytes, prompt))
         return f"vision saw {len(image_bytes)} bytes: {prompt or 'describe'}"
+
+    def warm_resident_profiles(self):
+        self.warmed = True
+        return []
+
+    def preload_vision_model(self) -> None:
+        self.vision_loaded = True
 
 
 class FakeController:
@@ -111,6 +120,16 @@ class FakeController:
 
     def reload_soul(self) -> None:  # returns None, like the real controller
         self.reloaded_soul = True
+
+    # session load
+    def load(self) -> None:
+        self.loaded = True
+        self.load_called = True
+
+    def switch_chat_model(self, name, *, persist=True) -> str:
+        self.model_name = name
+        self.loaded = True
+        return name
 
     # rag
     def enable_rag(self, sources=None) -> None:
@@ -217,6 +236,52 @@ def test_ws_chat_rejects_empty(client: TestClient) -> None:
         ws.send_json({"message": "   "})
         frame = ws.receive_json()
         assert frame["type"] == "error"
+
+
+# -- session start / deferred load --------------------------------------
+
+
+def test_run_session_load_loads_all() -> None:
+    from app.server.api import run_session_load
+
+    controller = FakeController(vision=True)
+    controller.loaded = False
+    state = {"stage": "starting", "vision_loaded": False, "loading": True}
+    request = SimpleNamespace(chat_model=None, load_agents=True, load_vision=True)
+    run_session_load(controller, request, state)
+    assert controller.loaded is True
+    assert controller.runtime.warmed is True
+    assert state["vision_loaded"] is True
+    assert state["stage"] == "ready"
+    assert state["loading"] is False
+
+
+def test_run_session_load_switches_model() -> None:
+    from app.server.api import run_session_load
+
+    controller = FakeController()
+    state = {"stage": "starting", "vision_loaded": False, "loading": True}
+    request = SimpleNamespace(
+        chat_model="other.gguf", load_agents=False, load_vision=False
+    )
+    run_session_load(controller, request, state)
+    assert controller.model_name == "other.gguf"
+    assert controller.runtime.warmed is False
+
+
+def test_session_start_endpoint(client: TestClient) -> None:
+    r = client.post(
+        "/api/session/start",
+        json={"chat_model": None, "load_agents": False, "load_vision": False},
+    )
+    assert r.status_code == 200
+    assert r.json()["started"] is True
+
+
+def test_ping_exposes_stage_and_vision(client: TestClient) -> None:
+    body = client.get("/api/ping").json()
+    assert "stage" in body
+    assert "vision_loaded" in body
 
 
 # -- snapshot -----------------------------------------------------------

@@ -26,6 +26,7 @@ class _Ctrl:
         self.model_name = "m.gguf"
         self.loaded = True
         self.compute_backend = "GPU"
+        self.runtime = SimpleNamespace(vision_loaded=False)
 
     def run_health_check(self) -> str:
         return "healthy"

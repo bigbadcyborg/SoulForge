@@ -138,7 +138,8 @@ class ChatWindow(QMainWindow):
                     self._was_ready = True
                     self._append("System", f"Model ready: {model}")
             else:
-                self.status_label.setText(f"⏳ Loading model {model} — please wait…")
+                stage = info.get("stage") or "loading"
+                self.status_label.setText(f"⏳ {stage.capitalize()} — please wait…")
                 self.input.setPlaceholderText("Loading model, please wait…")
             self.input.setEnabled(ready)
             self.send_btn.setEnabled(ready)

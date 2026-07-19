@@ -32,6 +32,8 @@ from app.server.schemas import (
     CommandRequest,
     CommandResponse,
     PingResponse,
+    SessionStartRequest,
+    SessionStartResponse,
     SnapshotResponse,
     TranscribeResponse,
 )
@@ -99,6 +101,43 @@ def _chat_frames(controller: ChatController, text: str, loop, queue: asyncio.Que
         loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
 
 
+def run_session_load(controller: ChatController, request, state: dict) -> None:
+    """Load the chosen models for a session, updating ``state`` as it goes.
+
+    Runs on a worker thread. ``request`` has chat_model / load_agents /
+    load_vision. Best-effort: a vision/agent failure is recorded but does not
+    stop the chat model from becoming ready.
+    """
+    try:
+        state["stage"] = "loading chat model"
+        chat_model = getattr(request, "chat_model", None)
+        current = controller.model_name
+        if chat_model and chat_model not in ("", current):
+            controller.switch_chat_model(chat_model)
+        else:
+            controller.load()
+
+        if getattr(request, "load_agents", False):
+            state["stage"] = "warming agent models"
+            try:
+                controller.runtime.warm_resident_profiles()
+            except Exception as error:  # noqa: BLE001
+                state["error"] = f"agent preload failed: {error}"
+
+        if getattr(request, "load_vision", False) and controller.config.vision.enabled:
+            state["stage"] = "loading vision model"
+            try:
+                controller.runtime.preload_vision_model()
+                state["vision_loaded"] = True
+            except Exception as error:  # noqa: BLE001
+                state["error"] = f"vision preload failed: {error}"
+    except Exception as error:  # noqa: BLE001
+        state["error"] = f"model load failed: {error}"
+    finally:
+        state["stage"] = "ready"
+        state["loading"] = False
+
+
 def create_app(controller: ChatController, transcriber=None) -> FastAPI:
     """Build the FastAPI app bound to a ready ChatController.
 
@@ -115,14 +154,38 @@ def create_app(controller: ChatController, transcriber=None) -> FastAPI:
 
         transcriber = Transcriber(controller.config.transcription)
 
+    # Shared session-load state (updated by the loader thread, read by ping).
+    session_state: dict = {"stage": "idle", "vision_loaded": False, "loading": False}
+
     @app.get("/api/ping", response_model=PingResponse)
     async def ping() -> PingResponse:
+        stage = session_state["stage"]
+        if stage in ("idle", "ready"):
+            stage = "ready" if controller.loaded else "idle"
         return PingResponse(
             status="ok",
             model=controller.model_name,
             ready=controller.loaded,
             compute_backend=str(controller.compute_backend),
+            stage=stage,
+            vision_loaded=session_state["vision_loaded"] or controller.runtime.vision_loaded,
         )
+
+    @app.post(
+        "/api/session/start",
+        response_model=SessionStartResponse,
+        dependencies=[Depends(auth)],
+    )
+    async def session_start(request: SessionStartRequest) -> SessionStartResponse:
+        if session_state["loading"]:
+            return SessionStartResponse(started=False, message="Already loading.")
+        session_state.update({"loading": True, "stage": "starting", "error": None})
+        threading.Thread(
+            target=run_session_load,
+            args=(controller, request, session_state),
+            daemon=True,
+        ).start()
+        return SessionStartResponse(started=True, message="Loading started.")
 
     @app.get("/api/commands", dependencies=[Depends(auth)])
     async def commands() -> dict[str, list[str]]:

@@ -35,6 +35,21 @@ class ApiClient:
     def ping(self) -> dict[str, Any]:
         return self._http.get("/api/ping").json()
 
+    def session_start(
+        self, chat_model: str | None, load_agents: bool, load_vision: bool
+    ) -> dict[str, Any]:
+        resp = self._http.post(
+            "/api/session/start",
+            json={
+                "chat_model": chat_model,
+                "load_agents": load_agents,
+                "load_vision": load_vision,
+            },
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def commands(self) -> list[str]:
         resp = self._http.get("/api/commands", headers=self._headers())
         resp.raise_for_status()

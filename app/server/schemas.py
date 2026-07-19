@@ -24,6 +24,19 @@ class PingResponse(BaseModel):
     model: str
     ready: bool
     compute_backend: str
+    stage: str = "ready"
+    vision_loaded: bool = False
+
+
+class SessionStartRequest(BaseModel):
+    chat_model: str | None = None  # None = keep configured default
+    load_agents: bool = False
+    load_vision: bool = False
+
+
+class SessionStartResponse(BaseModel):
+    started: bool
+    message: str = ""
 
 
 class SnapshotResponse(BaseModel):

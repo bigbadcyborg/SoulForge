@@ -169,6 +169,15 @@ class ModelRuntime:
             self._vision = None
         gc.collect()
 
+    def preload_vision_model(self) -> None:
+        """Load the vision model now so the first snapshot is fast."""
+        with self._lock:
+            self._load_vision_unlocked()
+
+    @property
+    def vision_loaded(self) -> bool:
+        return self._vision is not None
+
     def create_vision_completion(self, image_bytes: bytes, prompt: str) -> str:
         """Describe/answer about an image using the configured vision model.
 

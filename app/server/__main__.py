@@ -37,6 +37,11 @@ def main() -> None:
     parser.add_argument("--host", default=None, help="Override server.host")
     parser.add_argument("--port", type=int, default=None, help="Override server.port")
     parser.add_argument("--config", default=None, help="Path to config.yaml")
+    parser.add_argument(
+        "--defer-load",
+        action="store_true",
+        help="Do not auto-load the model; wait for the GUI to choose via /api/session/start.",
+    )
     args = parser.parse_args()
 
     try:
@@ -49,11 +54,16 @@ def main() -> None:
         host = args.host or config.server.host
         port = args.port or config.server.port
 
-        # Load the model in the background so uvicorn binds immediately.
-        print("Starting model load in the background...")
-        threading.Thread(
-            target=_load_model_background, args=(controller,), daemon=True
-        ).start()
+        # Load the model in the background so uvicorn binds immediately. With
+        # --defer-load the GUI drives loading via /api/session/start instead, so
+        # the user's model choice doesn't race with an eager default load.
+        if args.defer_load:
+            print("Deferring model load; waiting for the GUI to choose models.")
+        else:
+            print("Starting model load in the background...")
+            threading.Thread(
+                target=_load_model_background, args=(controller,), daemon=True
+            ).start()
 
         get_logger("server").info("Serving SoulForge API on %s:%s", host, port)
         print(f"SoulForge API listening on http://{host}:{port} (model loading...)")
