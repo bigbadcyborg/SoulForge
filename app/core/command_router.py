@@ -159,10 +159,31 @@ class CommandRouter:
             return CommandResult.message(
                 f"Switched to model: {c.switch_chat_model(parts[1])}"
             )
+        if sub == "vision":
+            return self._models_vision(parts[1:])
         return CommandResult.error(
             "Usage: /models | /models chat <model> | /models role <role> <model> | "
-            "/models profile <profile> <model>"
+            "/models profile <profile> <model> | /models vision <model> [mmproj]"
         )
+
+    def _models_vision(self, rest: list[str]) -> CommandResult:
+        c = self.controller
+        if not rest:
+            return CommandResult.message(c.format_vision_view())
+        first = rest[0].lower()
+        if first in ("off", "disable", "none"):
+            return CommandResult.message(c.disable_vision())
+        if first == "mmproj" and len(rest) >= 2:
+            return CommandResult.message(c.set_vision_mmproj(rest[1]))
+        if first == "handler" and len(rest) >= 2:
+            v = c.config.vision
+            return CommandResult.message(
+                c.set_vision_model(v.model_path, v.mmproj_path, handler=rest[1])
+            )
+        # /models vision <model> [mmproj]
+        model = rest[0]
+        mmproj = rest[1] if len(rest) >= 2 else None
+        return CommandResult.message(c.set_vision_model(model, mmproj))
 
     # memory
     def _memory(self, args: str) -> CommandResult:

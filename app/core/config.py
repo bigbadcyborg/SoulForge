@@ -723,6 +723,48 @@ def save_agents(
         raise
 
 
+def vision_to_yaml_dict(vision: VisionConfig) -> dict[str, Any]:
+    """Convert VisionConfig to the camelCase dict written under ``vision:``."""
+    return {
+        "modelPath": vision.model_path,
+        "mmprojPath": vision.mmproj_path,
+        "chatHandler": vision.chat_handler,
+        "contextSize": vision.context_size,
+        "maxTokens": vision.max_tokens,
+        "evictChat": vision.evict_chat,
+    }
+
+
+def save_vision(
+    config: AppConfig,
+    path: str | Path | None = None,
+) -> None:
+    """Persist the current vision section to ``config.yaml`` (atomic write)."""
+    config_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    else:
+        data = dict(config.raw) if config.raw else {}
+
+    data["vision"] = vision_to_yaml_dict(config.vision)
+    config.raw = data
+
+    directory = config_path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+
+    fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".config-", suffix=".yaml.tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(data, handle, default_flow_style=False, sort_keys=False)
+        os.replace(temp_path, config_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
+
+
 def save_tools(
     config: AppConfig,
     path: str | Path | None = None,

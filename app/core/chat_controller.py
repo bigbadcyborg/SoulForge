@@ -19,10 +19,12 @@ from app.core.config import (
     PROJECT_ROOT,
     AgentModelProfileConfig,
     AppConfig,
+    resolve_path,
     save_agents,
     save_chat_model,
     save_onboarding,
     save_tools,
+    save_vision,
 )
 from app.core.diagnostics import (
     format_config_view,
@@ -460,6 +462,10 @@ class ChatController:
                 f"residency={profile.residency}"
             )
 
+        vision = self.config.vision
+        vision_label = vision.model.name if (vision.enabled and vision.model) else "(disabled)"
+        lines.extend(["", "Vision model (snapshots):", f"  {vision_label}"])
+
         lines.extend(
             [
                 "",
@@ -468,6 +474,8 @@ class ChatController:
                 "  /models role <role> <model>       Set one agent role to a model",
                 "  /models role <role> inherit       Make one role inherit /model",
                 "  /models profile <profile> <model> Change a shared agent profile",
+                "  /models vision <model> [mmproj]   Set the snapshot vision model",
+                "  /models vision off                Disable the vision model",
             ]
         )
         return "\n".join(lines)
@@ -539,6 +547,93 @@ class ChatController:
             f"Profile '{profile_key}' now uses model: {model_label}. "
             "(saved to config.yaml)"
         )
+
+    def _resolve_local_gguf(self, token: str) -> Path:
+        """Resolve a GGUF path from an explicit path or a name under ./models."""
+        token = token.strip().strip('"').strip("'")
+        candidates = [
+            resolve_path(token),
+            resolve_path(f"./models/{token}"),
+        ]
+        for path in candidates:
+            if path.exists():
+                return path
+        # Fall back to a unique partial match among ./models/*.gguf.
+        models_dir = resolve_path("./models")
+        if models_dir.exists():
+            matches = [
+                p for p in models_dir.glob("*.gguf") if token.lower() in p.name.lower()
+            ]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Ambiguous model '{token}'. Matches: "
+                    + ", ".join(p.name for p in matches)
+                )
+        raise FileNotFoundError(f"GGUF not found: {token}")
+
+    def format_vision_view(self) -> str:
+        """Human-readable current vision-model configuration."""
+        v = self.config.vision
+        if not v.enabled:
+            return (
+                "Vision model: (disabled)\n"
+                "Set one with: /models vision <model.gguf> <mmproj.gguf>"
+            )
+        return "\n".join(
+            [
+                "Vision model:",
+                f"  model:   {v.model_path}",
+                f"  mmproj:  {v.mmproj_path or '(missing — required)'}",
+                f"  handler: {v.chat_handler}",
+                f"  evictChat: {v.evict_chat}",
+            ]
+        )
+
+    def set_vision_model(
+        self,
+        model_selection: str,
+        mmproj_selection: str | None = None,
+        *,
+        handler: str | None = None,
+        persist: bool = True,
+    ) -> str:
+        """Point the vision model at a new GGUF (and optional mmproj), then persist."""
+        model = self._resolve_local_gguf(model_selection)
+        self.config.vision.model_path = path_for_config(model)
+        if mmproj_selection:
+            mmproj = self._resolve_local_gguf(mmproj_selection)
+            self.config.vision.mmproj_path = path_for_config(mmproj)
+        if handler:
+            self.config.vision.chat_handler = handler
+        self.runtime.unload_vision_model()
+        if persist:
+            save_vision(self.config)
+        mmproj_note = (
+            self.config.vision.mmproj_path or "(none set — add the mmproj file!)"
+        )
+        return (
+            f"Vision model set to {model.name} (mmproj: {mmproj_note}, "
+            f"handler: {self.config.vision.chat_handler}). Saved to config.yaml."
+        )
+
+    def set_vision_mmproj(self, mmproj_selection: str, *, persist: bool = True) -> str:
+        """Set only the vision mmproj (CLIP projector) file."""
+        mmproj = self._resolve_local_gguf(mmproj_selection)
+        self.config.vision.mmproj_path = path_for_config(mmproj)
+        self.runtime.unload_vision_model()
+        if persist:
+            save_vision(self.config)
+        return f"Vision mmproj set to {mmproj.name}. Saved to config.yaml."
+
+    def disable_vision(self, *, persist: bool = True) -> str:
+        """Disable the vision model (snapshot falls back to reporting no model)."""
+        self.config.vision.model_path = ""
+        self.runtime.unload_vision_model()
+        if persist:
+            save_vision(self.config)
+        return "Vision model disabled. Saved to config.yaml."
 
     def switch_chat_model(self, model_path: str | Path, *, persist: bool = True) -> str:
         """Unload the current chat model, load *model_path*, and optionally persist."""

@@ -65,6 +65,7 @@ class FakeController:
         )
         self.runtime = FakeRuntime()
         self.messages: list[dict] = []
+        self.vision_model = ""
         self.last_retrieved_chunks: list = []
         self.skill_manager = SimpleNamespace(
             list_skills=lambda status="active": (
@@ -127,6 +128,18 @@ class FakeController:
 
     def get_rag_stats(self) -> dict:
         return {"sources": ["a.md", "b.md"], "chunk_count": 42}
+
+    # vision
+    def format_vision_view(self) -> str:
+        return f"Vision model: {self.vision_model or '(disabled)'}"
+
+    def set_vision_model(self, model, mmproj=None, *, handler=None, persist=True) -> str:
+        self.vision_model = model
+        return f"Vision model set to {model}."
+
+    def disable_vision(self, *, persist=True) -> str:
+        self.vision_model = ""
+        return "Vision model disabled."
 
     # tasks / sources
     def get_board_view(self) -> str:
@@ -316,6 +329,20 @@ def test_router_tasks_and_skills() -> None:
     router = CommandRouter(FakeController())
     assert "Backlog" in router.dispatch("tasks").text
     assert "demo" in router.dispatch("skills").text
+
+
+def test_router_models_vision() -> None:
+    controller = FakeController()
+    router = CommandRouter(controller)
+    # set model + mmproj
+    result = router.dispatch("models", "vision qwen.gguf mmproj.gguf")
+    assert result.success is True
+    assert controller.vision_model == "qwen.gguf"
+    # view
+    assert "qwen.gguf" in router.dispatch("models", "vision").text
+    # disable
+    router.dispatch("models", "vision off")
+    assert controller.vision_model == ""
 
 
 def test_reload_soul_returns_string_not_none() -> None:

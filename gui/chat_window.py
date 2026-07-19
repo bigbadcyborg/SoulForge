@@ -101,6 +101,9 @@ class ChatWindow(QMainWindow):
         # Right: command button bar
         right = QVBoxLayout()
         right.addWidget(QLabel("Commands"))
+        manage_btn = QPushButton("Manage Models…")
+        manage_btn.clicked.connect(self._open_models_dialog)
+        right.addWidget(manage_btn)
         for label, name, prompt in COMMAND_BUTTONS:
             btn = QPushButton(label)
             btn.clicked.connect(
@@ -254,6 +257,12 @@ class ChatWindow(QMainWindow):
         self._show_result(name, result.get("text", "(no output)"))
         if name in ("features", "model", "models"):
             self._refresh_status()
+
+    def _open_models_dialog(self) -> None:
+        from gui.models_dialog import ModelsDialog
+
+        ModelsDialog(self.client, self).exec()
+        self._refresh_status()
 
     def _show_result(self, title: str, text: str) -> None:
         dialog = QMessageBox(self)

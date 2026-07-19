@@ -232,6 +232,49 @@ def test_set_agent_role_model_isolates_shared_profile(model_env, monkeypatch) ->
     controller.runtime.unload_chat_profile.assert_called_once_with("critic")
 
 
+def test_set_vision_model_and_disable(model_env, monkeypatch) -> None:
+    _, models_dir, config, _ = model_env
+    (models_dir / "vis.gguf").write_bytes(b"x")
+    (models_dir / "mm.gguf").write_bytes(b"x")
+    controller = ChatController(config)
+    controller.runtime = MagicMock()
+    monkeypatch.setattr(
+        "app.core.chat_controller.save_vision", lambda cfg, path=None: None
+    )
+
+    message = controller.set_vision_model(
+        str(models_dir / "vis.gguf"), str(models_dir / "mm.gguf")
+    )
+    assert "vis.gguf" in message
+    assert config.vision.model_path.endswith("vis.gguf")
+    assert config.vision.mmproj_path.endswith("mm.gguf")
+    assert config.vision.enabled is True
+    controller.runtime.unload_vision_model.assert_called_once()
+
+    controller.runtime.reset_mock()
+    controller.disable_vision()
+    assert config.vision.enabled is False
+    controller.runtime.unload_vision_model.assert_called_once()
+
+
+def test_save_vision_round_trip(model_env) -> None:
+    import yaml
+
+    from app.core.config import load_config, save_vision
+
+    _, models_dir, config, config_path = model_env
+    config.vision.model_path = "./models/vis.gguf"
+    config.vision.mmproj_path = "./models/mm.gguf"
+    config.vision.chat_handler = "qwen2.5-vl"
+    save_vision(config, config_path)
+
+    reloaded = load_config(config_path)
+    assert reloaded.vision.model_path == "./models/vis.gguf"
+    assert reloaded.vision.chat_handler == "qwen2.5-vl"
+    saved = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert saved["vision"]["mmprojPath"] == "./models/mm.gguf"
+
+
 def test_set_agent_role_model_does_not_touch_shared_creator_profile(
     model_env, monkeypatch
 ) -> None:
