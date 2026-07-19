@@ -37,7 +37,6 @@ def _escape_html(text: str) -> str:
 # Command buttons: (label, command name, prompt-for-args?). A prompt lets the
 # user supply the sub-command/argument (e.g. "run <goal>", "load <id>").
 COMMAND_BUTTONS = [
-    ("Help", "help", False),
     ("Health", "health", False),
     ("Features", "features", True),
     ("Model", "model", True),
@@ -102,6 +101,9 @@ class ChatWindow(QMainWindow):
         # Right: command button bar
         right = QVBoxLayout()
         right.addWidget(QLabel("Commands"))
+        help_btn = QPushButton("Help…")
+        help_btn.clicked.connect(self._open_help_browser)
+        right.addWidget(help_btn)
         manage_btn = QPushButton("Manage Models…")
         manage_btn.clicked.connect(self._open_models_dialog)
         right.addWidget(manage_btn)
@@ -262,6 +264,18 @@ class ChatWindow(QMainWindow):
         self._show_result(name, result.get("text", "(no output)"))
         if name in ("features", "model", "models"):
             self._refresh_status()
+
+    def _open_help_browser(self) -> None:
+        from gui.help_browser import HelpBrowserDialog
+
+        dialog = HelpBrowserDialog(self.client, self)
+        dialog.insert_requested.connect(self._insert_command)
+        dialog.exec()
+
+    def _insert_command(self, usage: str) -> None:
+        # Drop the command usage into the input so the user can fill in args.
+        self.input.setText(usage)
+        self.input.setFocus()
 
     def _open_models_dialog(self) -> None:
         from gui.models_dialog import ModelsDialog

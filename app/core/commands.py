@@ -774,6 +774,38 @@ def format_agents_help_text() -> str:
     )
 
 
+# Detailed guide topics (key used with /help <key>) -> display title.
+HELP_GUIDES: tuple[tuple[str, str], ...] = (
+    ("models", "Model routing"),
+    ("agents", "Multi-agent workflows"),
+    ("tools", "Tool harness"),
+    ("sessions", "Sessions"),
+    ("diagnostics", "Diagnostics & health"),
+    ("crystallize", "Skills & crystallization"),
+)
+
+
+def help_catalog() -> dict:
+    """Structured command reference for the GUI help browser.
+
+    Reuses the ``COMMANDS`` registry (grouped in its declared category order) and
+    the detailed guide topics, so there is a single source of truth for help.
+    """
+    categories: list[dict] = []
+    by_name: dict[str, dict] = {}
+    for cmd in COMMANDS:
+        entry = by_name.get(cmd.category)
+        if entry is None:
+            entry = {"name": cmd.category, "commands": []}
+            by_name[cmd.category] = entry
+            categories.append(entry)
+        entry["commands"].append(
+            {"usage": cmd.usage, "description": cmd.description}
+        )
+    guides = [{"key": key, "title": title} for key, title in HELP_GUIDES]
+    return {"categories": categories, "guides": guides}
+
+
 def format_help_text(topic: str = "", config: AppConfig | None = None) -> str:
     """Format command help for /help or /help <topic>."""
     topic_key = topic.strip().lower()

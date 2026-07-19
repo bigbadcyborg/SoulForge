@@ -414,6 +414,34 @@ def test_router_tasks_and_skills() -> None:
     assert "demo" in router.dispatch("skills").text
 
 
+def test_help_catalog_structure() -> None:
+    from app.core.commands import help_catalog
+
+    cat = help_catalog()
+    names = [c["name"] for c in cat["categories"]]
+    # All 12 declared categories are present, each with commands.
+    for expected in [
+        "General", "Model", "Memory", "Agents", "Kanban", "Tools",
+        "RAG", "Skills", "Curator", "Sessions", "Features", "Persona",
+    ]:
+        assert expected in names
+    assert all(c["commands"] for c in cat["categories"])
+    guide_keys = [g["key"] for g in cat["guides"]]
+    for key in ["models", "agents", "tools", "sessions", "diagnostics", "crystallize"]:
+        assert key in guide_keys
+
+
+def test_router_help_catalog_and_topic() -> None:
+    router = CommandRouter(FakeController())
+    catalog = router.dispatch("help", "catalog")
+    assert catalog.kind == "data"
+    assert "categories" in catalog.data and "guides" in catalog.data
+    # A topic still returns rendered text.
+    topic = router.dispatch("help", "models")
+    assert topic.kind == "message"
+    assert topic.text
+
+
 def test_router_models_info() -> None:
     result = CommandRouter(FakeController()).dispatch("models", "info")
     assert result.kind == "data"

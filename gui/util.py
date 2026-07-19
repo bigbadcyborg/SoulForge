@@ -31,6 +31,14 @@ def capture_region_png(left: int, top: int, width: int, height: int) -> bytes:
     return buffer.getvalue()
 
 
+def command_matches(query: str, usage: str, description: str) -> bool:
+    """Case-insensitive substring match of a help command against a search query."""
+    q = query.strip().lower()
+    if not q:
+        return True
+    return q in usage.lower() or q in description.lower()
+
+
 def to_pynput_hotkey(hotkey: str) -> str:
     """Convert 'ctrl+alt+s' to pynput's '<ctrl>+<alt>+s' format."""
     mods = {"ctrl", "alt", "shift", "cmd", "super"}

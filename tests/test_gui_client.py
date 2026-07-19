@@ -86,6 +86,17 @@ def test_normalize_rect_orders_corners() -> None:
     assert normalize_rect(10, 10, 50, 60) == (10, 10, 40, 50)
 
 
+def test_command_matches() -> None:
+    from gui.util import command_matches
+
+    assert command_matches("", "/anything", "desc") is True  # empty = match all
+    assert command_matches("role", "/models role <role> <model>", "route a role") is True
+    assert command_matches("VISION", "/models vision", "set vision model") is True
+    assert command_matches("snapshot", "/models vision", "set vision model") is False
+    # matches on description too
+    assert command_matches("kanban", "/tasks", "open the Kanban board") is True
+
+
 def test_to_pynput_hotkey_format() -> None:
     from gui.util import to_pynput_hotkey
 

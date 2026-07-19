@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app.core.chat_controller import ChatController
-from app.core.commands import format_help_text
+from app.core.commands import format_help_text, help_catalog
 from app.core.config import FEATURE_DISPLAY_NAMES
 
 
@@ -88,6 +88,8 @@ class CommandRouter:
     # by area; registered in the _HANDLERS table at the bottom.
 
     def _help(self, args: str) -> CommandResult:
+        if args.strip().lower() == "catalog":
+            return CommandResult.structured("Help catalog.", help_catalog())
         return CommandResult.message(format_help_text(args, self.controller.config))
 
     def _status(self, args: str) -> CommandResult:
