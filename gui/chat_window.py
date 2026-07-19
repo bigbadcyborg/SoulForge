@@ -127,23 +127,26 @@ class ChatWindow(QMainWindow):
     def _refresh_status(self) -> bool:
         try:
             info = self.client.ping()
-            ready = bool(info.get("ready"))
             model = info.get("model")
-            if ready:
+            # Only allow prompting once ALL requested models finished loading —
+            # a background vision/agent load holds the model lock, so a prompt
+            # sent early would hang until it completes.
+            can_prompt = bool(info.get("ready")) and not bool(info.get("loading"))
+            if can_prompt:
                 self.status_label.setText(
                     f"✅ {model} ({info.get('compute_backend')}) — ready"
                 )
                 self.input.setPlaceholderText("Type a message and press Enter")
                 if not self._was_ready:
                     self._was_ready = True
-                    self._append("System", f"Model ready: {model}")
+                    self._append("System", "All models loaded — ready to chat.")
             else:
                 stage = info.get("stage") or "loading"
-                self.status_label.setText(f"⏳ {stage.capitalize()} — please wait…")
-                self.input.setPlaceholderText("Loading model, please wait…")
-            self.input.setEnabled(ready)
-            self.send_btn.setEnabled(ready)
-            return ready
+                self.status_label.setText(f"⏳ {stage} — please wait…")
+                self.input.setPlaceholderText("Loading models, please wait…")
+            self.input.setEnabled(can_prompt)
+            self.send_btn.setEnabled(can_prompt)
+            return can_prompt
         except Exception as error:  # noqa: BLE001
             self.status_label.setText(f"⏳ Waiting for server… ({error})")
             self.input.setEnabled(False)

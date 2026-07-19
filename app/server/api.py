@@ -172,6 +172,7 @@ def create_app(controller: ChatController, transcriber=None) -> FastAPI:
             compute_backend=str(controller.compute_backend),
             stage=stage,
             vision_loaded=session_state["vision_loaded"] or controller.runtime.vision_loaded,
+            loading=session_state["loading"],
         )
 
     @app.post(
@@ -255,8 +256,12 @@ def create_app(controller: ChatController, transcriber=None) -> FastAPI:
                 if not text:
                     await websocket.send_json({"type": "error", "text": "Empty message."})
                     continue
-                if not controller.loaded:
-                    await websocket.send_json({"type": "error", "text": "Model still loading."})
+                if not controller.loaded or session_state["loading"]:
+                    # A background load holds the model lock; refuse rather than
+                    # hang the prompt until it finishes.
+                    await websocket.send_json(
+                        {"type": "error", "text": "Models still loading — please wait."}
+                    )
                     continue
                 queue: asyncio.Queue = asyncio.Queue()
                 threading.Thread(

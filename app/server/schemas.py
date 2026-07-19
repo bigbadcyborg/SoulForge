@@ -22,10 +22,11 @@ class CommandResponse(BaseModel):
 class PingResponse(BaseModel):
     status: str
     model: str
-    ready: bool
+    ready: bool  # chat model loaded
     compute_backend: str
     stage: str = "ready"
     vision_loaded: bool = False
+    loading: bool = False  # a session load (chat/agents/vision) is still running
 
 
 class SessionStartRequest(BaseModel):

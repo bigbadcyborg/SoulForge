@@ -293,6 +293,8 @@ def test_ping_exposes_stage_and_vision(client: TestClient) -> None:
     body = client.get("/api/ping").json()
     assert "stage" in body
     assert "vision_loaded" in body
+    assert "loading" in body
+    assert body["loading"] is False
 
 
 # -- snapshot -----------------------------------------------------------
