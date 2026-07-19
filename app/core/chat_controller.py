@@ -697,11 +697,19 @@ class ChatController:
         return truncated
 
     def clear_all_memory(self) -> None:
-        """Wipe user.md, memory.md, and session.md, then rebuild prompt memory."""
+        """Wipe user/memory/session files and episodic history, then rebuild."""
         for section in ("user", "memory", "session"):
             self.memory_manager.save(section, "")
         self.pending_suggestion = None
+        self.episodic_memory.clear()
+        self.last_episodic_results = []
         self.reload_memory()
+
+    def clear_episodic_memory(self) -> str:
+        """Forget stored conversation history (episodic memory) only."""
+        count = self.episodic_memory.clear()
+        self.last_episodic_results = []
+        return f"Cleared {count} remembered conversation turn(s)."
 
     def search_episodic_memory(
         self,

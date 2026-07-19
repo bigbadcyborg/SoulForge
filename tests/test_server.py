@@ -443,10 +443,25 @@ def test_router_covers_full_command_set() -> None:
     # A representative sweep across every command group.
     for expected in [
         "help", "status", "rag", "ingest", "sources", "memory-review",
-        "skills", "crystallize", "curator", "tasks", "task-new", "agents",
-        "session-save", "tools", "tool-approve",
+        "memory-forget", "skills", "crystallize", "curator", "tasks",
+        "task-new", "agents", "session-save", "tools", "tool-approve",
     ]:
         assert expected in names
+
+
+def test_memory_forget_clears_episodic() -> None:
+    controller = FakeController()
+    controller.episodic_cleared = 0
+
+    def clear_episodic():
+        controller.episodic_cleared += 1
+        return "Cleared 3 remembered conversation turn(s)."
+
+    controller.clear_episodic_memory = clear_episodic
+    result = CommandRouter(controller).dispatch("memory-forget")
+    assert result.success is True
+    assert "Cleared 3" in result.text
+    assert controller.episodic_cleared == 1
 
 
 # -- config -------------------------------------------------------------

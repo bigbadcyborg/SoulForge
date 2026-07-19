@@ -55,6 +55,29 @@ class EpisodicMemoryStore:
 
         return self._collection
 
+    def clear(self) -> int:
+        """Delete all stored conversation turns from the episodic collection.
+
+        Drops only the ``episodic_memory`` collection, leaving RAG documents in
+        the same ChromaDB untouched. Returns the number of turns removed.
+        """
+        try:
+            import chromadb
+
+            client = chromadb.PersistentClient(path=str(self.config.rag.db_dir))
+            try:
+                existing = client.get_collection(name=EPISODIC_COLLECTION)
+                count = existing.count()
+            except Exception:  # noqa: BLE001 - collection may not exist yet
+                count = 0
+            client.delete_collection(name=EPISODIC_COLLECTION)
+        except Exception as error:  # noqa: BLE001
+            print(f"[memory] Could not clear episodic memory: {error}")
+            return 0
+        finally:
+            self._collection = None
+        return count
+
     def add_turn(
         self,
         *,

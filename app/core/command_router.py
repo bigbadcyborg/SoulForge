@@ -199,7 +199,13 @@ class CommandRouter:
 
     def _memory_clear(self, args: str) -> CommandResult:
         self.controller.clear_all_memory()
-        return CommandResult.message("Cleared all memory sections.")
+        return CommandResult.message(
+            "Cleared all memory: user/memory/session files and remembered "
+            "conversation history (episodic memory)."
+        )
+
+    def _memory_forget(self, args: str) -> CommandResult:
+        return CommandResult.message(self.controller.clear_episodic_memory())
 
     def _memory_analysis(self, args: str) -> CommandResult:
         return CommandResult.message(self.controller.format_memory_analysis(args))
@@ -496,6 +502,7 @@ _HANDLERS: dict[str, Handler] = {
     "memory-on": CommandRouter._memory_on,
     "memory-off": CommandRouter._memory_off,
     "memory-clear": CommandRouter._memory_clear,
+    "memory-forget": CommandRouter._memory_forget,
     "memory-analysis": CommandRouter._memory_analysis,
     "memory-search": CommandRouter._memory_analysis,
     "memory-edit": CommandRouter._memory_edit,
