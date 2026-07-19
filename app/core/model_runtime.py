@@ -12,7 +12,7 @@ import gc
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from app.core.compute_backend import UNKNOWN, ComputeBackend, detect_compute_backend
 from app.core.config import AgentModelProfileConfig, AppConfig
@@ -45,6 +45,19 @@ class ModelRuntime:
         self._active_profile: str = ""
         self._resident_fallback: bool = False
         self._profile_errors: list[str] = []
+        self._load_listener: Callable[[str], None] | None = None
+
+    def set_load_listener(self, listener: Callable[[str], None] | None) -> None:
+        """Register a callback notified with a message when a model starts loading."""
+        self._load_listener = listener
+
+    def _notify_load(self, message: str) -> None:
+        print(message)
+        if self._load_listener is not None:
+            try:
+                self._load_listener(message)
+            except Exception:  # noqa: BLE001 - progress is best-effort
+                pass
 
     @property
     def compute_backend(self) -> ComputeBackend:
@@ -236,7 +249,7 @@ class ModelRuntime:
         from llama_cpp import Llama
 
         handler = self._build_vision_handler(str(mmproj_path))
-        print(f"Loading vision model '{model_path.name}'...")
+        self._notify_load(f"Loading vision model '{model_path.name}'...")
         self._vision = Llama(
             model_path=str(model_path),
             chat_handler=handler,
@@ -363,7 +376,8 @@ class ModelRuntime:
                 "Check model.chatModelPath or agents.modelProfiles in config.yaml."
             )
 
-        print(f"Loading chat model profile '{key}'...")
+        label = "chat model" if key == "default" else f"agent model '{key}'"
+        self._notify_load(f"Loading {label}...")
         profile = self._profile_config(key)
         chat_format = (
             profile.chat_format

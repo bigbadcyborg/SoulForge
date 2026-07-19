@@ -573,6 +573,27 @@ class ChatController:
                 )
         raise FileNotFoundError(f"GGUF not found: {token}")
 
+    def models_info(self) -> dict:
+        """Structured model routing for the GUI (chat, roles, vision, available)."""
+        available = [p.name for p in list_available_chat_models(self.config)]
+        roles: dict[str, str] = {}
+        for role_name, role in self.config.agents.roles.items():
+            profile = self.config.agents.model_profiles.get(role.model_profile)
+            roles[role_name] = (
+                self._agent_profile_model_label(profile) if profile else "(missing)"
+            )
+        v = self.config.vision
+        return {
+            "chat_model": self.model_name,
+            "available": available,
+            "roles": roles,
+            "vision": {
+                "enabled": v.enabled,
+                "model": v.model.name if (v.enabled and v.model) else "",
+                "mmproj": v.mmproj.name if v.mmproj else "",
+            },
+        }
+
     def format_vision_view(self) -> str:
         """Human-readable current vision-model configuration."""
         v = self.config.vision

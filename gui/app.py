@@ -30,6 +30,8 @@ def main() -> None:
         sys.exit(0)
     choices = dialog.choices()
     try:
+        # Apply per-role and vision model selections, then kick off the loads.
+        dialog.apply()
         startup_client.session_start(
             choices["chat_model"], choices["load_agents"], choices["load_vision"]
         )

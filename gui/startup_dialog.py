@@ -1,60 +1,120 @@
 """Startup model-selection dialog.
 
-Shown once before the main window: the user picks the chat model for the
-session and can opt to preload the agent role models and/or the vision model so
-nothing has to load lazily mid-session. Requires PySide6 (Windows GUI venv).
+Shown once before the main window. The user picks the session's chat model and
+can optionally configure + preload the agent role models and the vision model,
+so nothing has to load lazily mid-session. Requires PySide6 (Windows GUI venv).
 """
 
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QLabel,
+    QScrollArea,
     QVBoxLayout,
+    QWidget,
 )
 
 from gui.api_client import ApiClient
 
+INHERIT = "(inherit chat model)"
+AGENT_ROLES = [
+    "orchestrator",
+    "researcher",
+    "creator",
+    "executor",
+    "critic",
+    "synthesizer",
+]
+
 
 class StartupDialog(QDialog):
-    """Collects the session's chat model + optional agent/vision preloads."""
+    """Collects the session's chat model + optional agent-role and vision setup."""
 
     def __init__(self, client: ApiClient, parent=None) -> None:
         super().__init__(parent)
         self.client = client
         self.setWindowTitle("SoulForge — Start Session")
-        self.resize(460, 260)
+        self.resize(520, 620)
+        self._info = self._load_info()
+        self._role_combos: dict[str, QComboBox] = {}
         self._build_ui()
-        self._populate()
+
+    def _load_info(self) -> dict:
+        try:
+            return self.client.command("models", "info").get("data", {})
+        except Exception:  # noqa: BLE001
+            return {}
+
+    # -- UI --------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.addWidget(
+        outer = QVBoxLayout(self)
+        outer.addWidget(
             QLabel(
-                "Choose the model for this session. Loading happens up front so "
-                "the model is ready before you start."
+                "Choose the models for this session. Loading happens up front so "
+                "they're ready before you start."
             )
         )
-        form = QFormLayout()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        available = self._info.get("available", [])
+
+        # Chat model
+        chat_form = QFormLayout()
         self.model_combo = QComboBox()
-        form.addRow("Chat model:", self.model_combo)
-        layout.addLayout(form)
+        self.model_combo.addItems(available)
+        current = self._info.get("chat_model", "")
+        if current in available:
+            self.model_combo.setCurrentText(current)
+        chat_form.addRow("Chat model:", self.model_combo)
+        layout.addLayout(chat_form)
 
-        self.agents_check = QCheckBox(
-            "Preload agent role models (for /agents workflows)"
-        )
-        self.vision_check = QCheckBox("Preload vision model (for snapshots)")
-        layout.addWidget(self.agents_check)
-        layout.addWidget(self.vision_check)
+        # Agent roles (checkable group = preload agents)
+        self.agents_group = QGroupBox("Configure && preload agent role models")
+        self.agents_group.setCheckable(True)
+        self.agents_group.setChecked(False)
+        roles_form = QFormLayout(self.agents_group)
+        role_labels = self._info.get("roles", {})
+        for role in AGENT_ROLES:
+            combo = QComboBox()
+            combo.addItem(INHERIT)
+            combo.addItems(available)
+            label = role_labels.get(role, "")
+            if label in available:
+                combo.setCurrentText(label)
+            self._role_combos[role] = combo
+            roles_form.addRow(f"{role}:", combo)
+        layout.addWidget(self.agents_group)
 
-        self.vision_note = QLabel()
-        self.vision_note.setWordWrap(True)
-        self.vision_note.setStyleSheet("color: gray;")
-        layout.addWidget(self.vision_note)
+        # Vision (checkable group = preload vision)
+        self.vision_group = QGroupBox("Configure && preload vision model (snapshots)")
+        self.vision_group.setCheckable(True)
+        self.vision_group.setChecked(False)
+        vision_form = QFormLayout(self.vision_group)
+        self.vision_model_combo = QComboBox()
+        self.vision_model_combo.addItems(available)
+        self.vision_mmproj_combo = QComboBox()
+        self.vision_mmproj_combo.addItems(available)
+        vinfo = self._info.get("vision", {})
+        if vinfo.get("model") in available:
+            self.vision_model_combo.setCurrentText(vinfo["model"])
+        if vinfo.get("mmproj") in available:
+            self.vision_mmproj_combo.setCurrentText(vinfo["mmproj"])
+        vision_form.addRow("Vision model:", self.vision_model_combo)
+        vision_form.addRow("mmproj (projector):", self.vision_mmproj_combo)
+        layout.addWidget(self.vision_group)
+
+        layout.addStretch(1)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, stretch=1)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -62,38 +122,33 @@ class StartupDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Start")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        outer.addWidget(buttons)
 
-    def _populate(self) -> None:
-        # Available chat models (works before any model is loaded).
-        try:
-            models = self.client.command("model", "list").get("data", {}).get("models", [])
-        except Exception:  # noqa: BLE001
-            models = []
-        self.model_combo.addItems(models)
-        try:
-            current = self.client.ping().get("model", "")
-            if current in models:
-                self.model_combo.setCurrentText(current)
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Vision availability note (from /models vision).
-        try:
-            vtext = self.client.command("models", "vision").get("text", "")
-        except Exception:  # noqa: BLE001
-            vtext = ""
-        if "disabled" in vtext.lower():
-            self.vision_check.setEnabled(False)
-            self.vision_note.setText(
-                "No vision model configured — set one in Manage Models to enable snapshots."
-            )
-        else:
-            self.vision_note.setText(vtext.splitlines()[0] if vtext else "")
+    # -- results ---------------------------------------------------------
 
     def choices(self) -> dict:
+        role_models = {}
+        if self.agents_group.isChecked():
+            for role, combo in self._role_combos.items():
+                role_models[role] = combo.currentText()
         return {
             "chat_model": self.model_combo.currentText().strip() or None,
-            "load_agents": self.agents_check.isChecked(),
-            "load_vision": self.vision_check.isChecked(),
+            "load_agents": self.agents_group.isChecked(),
+            "role_models": role_models,
+            "load_vision": self.vision_group.isChecked(),
+            "vision_model": self.vision_model_combo.currentText().strip(),
+            "vision_mmproj": self.vision_mmproj_combo.currentText().strip(),
         }
+
+    def apply(self) -> None:
+        """Persist the role/vision selections via the API before loading."""
+        choices = self.choices()
+        if choices["load_agents"]:
+            for role, model in choices["role_models"].items():
+                arg = "inherit" if model == INHERIT else model
+                self.client.command("models", f"role {role} {arg}")
+        if choices["load_vision"] and choices["vision_model"]:
+            args = f"vision {choices['vision_model']}"
+            if choices["vision_mmproj"]:
+                args += f" {choices['vision_mmproj']}"
+            self.client.command("models", args)

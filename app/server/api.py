@@ -108,32 +108,35 @@ def run_session_load(controller: ChatController, request, state: dict) -> None:
     load_vision. Best-effort: a vision/agent failure is recorded but does not
     stop the chat model from becoming ready.
     """
+    # Surface the exact model being loaded (e.g. "Loading agent model 'creator'")
+    # to ping via the shared state, so the GUI shows real per-model progress.
+    controller.runtime.set_load_listener(lambda msg: state.__setitem__("stage", msg))
     try:
-        state["stage"] = "loading chat model"
+        state["stage"] = "Loading chat model..."
         chat_model = getattr(request, "chat_model", None)
         current = controller.model_name
         if chat_model and chat_model not in ("", current):
             controller.switch_chat_model(chat_model)
-        else:
-            controller.load()
+        elif not controller.loaded:
+            controller.load()  # skip if the chat model is already loaded
 
         if getattr(request, "load_agents", False):
-            state["stage"] = "warming agent models"
             try:
                 controller.runtime.warm_resident_profiles()
             except Exception as error:  # noqa: BLE001
                 state["error"] = f"agent preload failed: {error}"
 
         if getattr(request, "load_vision", False) and controller.config.vision.enabled:
-            state["stage"] = "loading vision model"
             try:
-                controller.runtime.preload_vision_model()
+                if not controller.runtime.vision_loaded:
+                    controller.runtime.preload_vision_model()
                 state["vision_loaded"] = True
             except Exception as error:  # noqa: BLE001
                 state["error"] = f"vision preload failed: {error}"
     except Exception as error:  # noqa: BLE001
         state["error"] = f"model load failed: {error}"
     finally:
+        controller.runtime.set_load_listener(None)
         state["stage"] = "ready"
         state["loading"] = False
 

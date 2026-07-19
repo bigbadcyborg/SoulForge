@@ -151,6 +151,8 @@ class CommandRouter:
             return CommandResult.message(c.format_models_view())
         parts = args.split(maxsplit=2)
         sub = parts[0].lower()
+        if sub == "info":
+            return CommandResult.structured("Model routing.", c.models_info())
         if sub == "role" and len(parts) == 3:
             return CommandResult.message(c.set_agent_role_model(parts[1], parts[2]))
         if sub == "profile" and len(parts) == 3:

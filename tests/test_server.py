@@ -50,6 +50,9 @@ class FakeRuntime:
     def preload_vision_model(self) -> None:
         self.vision_loaded = True
 
+    def set_load_listener(self, listener) -> None:
+        self._listener = listener
+
 
 class FakeController:
     """Minimal stand-in exercising the paths the server/router use."""
@@ -149,6 +152,14 @@ class FakeController:
         return {"sources": ["a.md", "b.md"], "chunk_count": 42}
 
     # vision
+    def models_info(self) -> dict:
+        return {
+            "chat_model": self.model_name,
+            "available": ["a.gguf", "b.gguf"],
+            "roles": {"creator": "a.gguf", "critic": "(inherit)"},
+            "vision": {"enabled": bool(self.vision_model), "model": "", "mmproj": ""},
+        }
+
     def format_vision_view(self) -> str:
         return f"Vision model: {self.vision_model or '(disabled)'}"
 
@@ -394,6 +405,14 @@ def test_router_tasks_and_skills() -> None:
     router = CommandRouter(FakeController())
     assert "Backlog" in router.dispatch("tasks").text
     assert "demo" in router.dispatch("skills").text
+
+
+def test_router_models_info() -> None:
+    result = CommandRouter(FakeController()).dispatch("models", "info")
+    assert result.kind == "data"
+    assert "available" in result.data
+    assert "roles" in result.data
+    assert "vision" in result.data
 
 
 def test_router_models_vision() -> None:
