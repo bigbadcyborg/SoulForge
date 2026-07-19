@@ -120,6 +120,14 @@ def run_session_load(controller: ChatController, request, state: dict) -> None:
         elif not controller.loaded:
             controller.load()  # skip if the chat model is already loaded
 
+        # RAG and episodic memory embed every prompt, so preload the embedding
+        # model too — otherwise the first prompt stalls loading it lazily.
+        if controller.features.is_enabled("memory") or controller.features.is_enabled("rag"):
+            try:
+                controller.runtime.load_embedding_model()
+            except Exception as error:  # noqa: BLE001
+                state["error"] = f"embedding preload failed: {error}"
+
         if getattr(request, "load_agents", False):
             try:
                 controller.runtime.warm_resident_profiles()

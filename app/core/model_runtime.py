@@ -414,7 +414,7 @@ class ModelRuntime:
                 "or disable RAG in config.yaml (features.rag: false)."
             )
 
-        print("Loading embedding model...")
+        self._notify_load("Loading embedding model...")
         self._embedder = Llama(
             model_path=str(model_path),
             embedding=True,

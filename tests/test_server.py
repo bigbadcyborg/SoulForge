@@ -38,6 +38,7 @@ class FakeRuntime:
         self.calls: list[tuple[bytes, str]] = []
         self.warmed = False
         self.vision_loaded = False
+        self.embed_loaded = False
 
     def create_vision_completion(self, image_bytes: bytes, prompt: str) -> str:
         self.calls.append((image_bytes, prompt))
@@ -49,6 +50,9 @@ class FakeRuntime:
 
     def preload_vision_model(self) -> None:
         self.vision_loaded = True
+
+    def load_embedding_model(self):
+        self.embed_loaded = True
 
     def set_load_listener(self, listener) -> None:
         self._listener = listener
@@ -262,6 +266,7 @@ def test_run_session_load_loads_all() -> None:
     run_session_load(controller, request, state)
     assert controller.loaded is True
     assert controller.runtime.warmed is True
+    assert controller.runtime.embed_loaded is True  # RAG on -> embedding preloaded
     assert state["vision_loaded"] is True
     assert state["stage"] == "ready"
     assert state["loading"] is False
