@@ -7,15 +7,16 @@ replies arrive via ChatStreamWorker signals. Requires PySide6 (Windows venv).
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextCursor, QTextOption
 from PySide6.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -269,10 +270,19 @@ class ChatWindow(QMainWindow):
         self._refresh_status()
 
     def _show_result(self, title: str, text: str) -> None:
-        dialog = QMessageBox(self)
+        # Scrollable, selectable dialog so long output (e.g. /help) is fully
+        # readable instead of being clipped by a message box.
+        dialog = QDialog(self)
         dialog.setWindowTitle(f"/{title}")
-        dialog.setText(text or "(no output)")
-        dialog.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        dialog.resize(680, 520)
+        layout = QVBoxLayout(dialog)
+        view = QPlainTextEdit(readOnly=True)
+        view.setPlainText(text or "(no output)")
+        view.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        layout.addWidget(view)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
         dialog.exec()
 
     def _drop_worker(self, worker) -> None:
