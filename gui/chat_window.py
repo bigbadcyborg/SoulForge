@@ -34,17 +34,17 @@ def _escape_html(text: str) -> str:
     """Escape command output so it renders literally inside a <pre> block."""
     return html.escape(text)
 
-# Command buttons: (label, command name, prompt-for-args?). A prompt lets the
-# user supply the sub-command/argument (e.g. "run <goal>", "load <id>").
-COMMAND_BUTTONS = [
-    ("Health", "health", False),
-    ("Features", "features", True),
-    ("Model", "model", True),
-    ("Memory", "memory", False),
-    ("RAG", "rag", True),
-    ("Sessions", "sessions", True),
-    ("Agents", "agents", True),
-    ("Tools", "tools", True),
+# Dialog-opener buttons: (label, dialog-open method name). Each opens a rich
+# point-and-click menu so no command syntax needs to be memorized.
+DIALOG_BUTTONS = [
+    ("Features", "_open_features_dialog"),
+    ("Memory", "_open_memory_dialog"),
+    ("RAG", "_open_rag_dialog"),
+    ("Sessions", "_open_sessions_dialog"),
+    ("Agents", "_open_agents_dialog"),
+    ("Tools", "_open_tools_dialog"),
+    ("Kanban", "_open_kanban_dialog"),
+    ("Curator", "_open_curator_dialog"),
 ]
 
 
@@ -100,19 +100,22 @@ class ChatWindow(QMainWindow):
 
         # Right: command button bar
         right = QVBoxLayout()
-        right.addWidget(QLabel("Commands"))
+        right.addWidget(QLabel("Menus"))
         help_btn = QPushButton("Help…")
         help_btn.clicked.connect(self._open_help_browser)
         right.addWidget(help_btn)
         manage_btn = QPushButton("Manage Models…")
         manage_btn.clicked.connect(self._open_models_dialog)
         right.addWidget(manage_btn)
-        for label, name, prompt in COMMAND_BUTTONS:
+        for label, method_name in DIALOG_BUTTONS:
             btn = QPushButton(label)
             btn.clicked.connect(
-                lambda _=False, n=name, p=prompt: self._run_command(n, p)
+                lambda _=False, m=method_name: getattr(self, m)()
             )
             right.addWidget(btn)
+        health_btn = QPushButton("Health")
+        health_btn.clicked.connect(lambda: self._run_command("health", False))
+        right.addWidget(health_btn)
         right.addStretch(1)
         self.snapshot_btn = QPushButton("Snapshot")
         self.snapshot_btn.clicked.connect(self.trigger_snapshot)
@@ -282,6 +285,48 @@ class ChatWindow(QMainWindow):
 
         ModelsDialog(self.client, self).exec()
         self._refresh_status()
+
+    # -- domain menu dialogs ---------------------------------------------
+
+    def _open_features_dialog(self) -> None:
+        from gui.features_dialog import FeaturesDialog
+
+        FeaturesDialog(self.client, self).exec()
+
+    def _open_memory_dialog(self) -> None:
+        from gui.memory_dialog import MemoryDialog
+
+        MemoryDialog(self.client, self).exec()
+
+    def _open_sessions_dialog(self) -> None:
+        from gui.sessions_dialog import SessionsDialog
+
+        SessionsDialog(self.client, self).exec()
+
+    def _open_rag_dialog(self) -> None:
+        from gui.rag_dialog import RagDialog
+
+        RagDialog(self.client, self).exec()
+
+    def _open_tools_dialog(self) -> None:
+        from gui.tools_dialog import ToolsDialog
+
+        ToolsDialog(self.client, self).exec()
+
+    def _open_kanban_dialog(self) -> None:
+        from gui.kanban_dialog import KanbanDialog
+
+        KanbanDialog(self.client, self).exec()
+
+    def _open_curator_dialog(self) -> None:
+        from gui.curator_dialog import CuratorDialog
+
+        CuratorDialog(self.client, self).exec()
+
+    def _open_agents_dialog(self) -> None:
+        from gui.agents_dialog import AgentsDialog
+
+        AgentsDialog(self.client, self).exec()
 
     def _show_result(self, title: str, text: str) -> None:
         # Scrollable, selectable dialog so long output (e.g. /help) is fully
