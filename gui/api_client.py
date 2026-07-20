@@ -74,6 +74,15 @@ class ApiClient:
         resp.raise_for_status()
         return resp.json()
 
+    def upload_doc(self, filename: str, content: bytes) -> dict[str, Any]:
+        resp = self._http.post(
+            "/api/rag/upload",
+            files={"document": (filename, content, "application/octet-stream")},
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def transcribe(self, audio_wav: bytes, language: str = "") -> dict[str, Any]:
         resp = self._http.post(
             "/api/transcribe",

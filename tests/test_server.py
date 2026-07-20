@@ -179,6 +179,62 @@ class FakeController:
     def get_board_view(self) -> str:
         return "Backlog: (empty)"
 
+    # -- domain structured data + writes (for GUI menus) ----------------
+    def memory_sections(self) -> dict:
+        return {
+            "injection_on": True,
+            "sections": {
+                "user": {"content": "hi", "limit": 3000},
+                "memory": {"content": "", "limit": 6000},
+                "session": {"content": "", "limit": 4000},
+            },
+        }
+
+    def save_memory(self, section: str, content: str) -> bool:
+        self.saved_memory = (section, content)
+        return False
+
+    def set_rag_sources(self, sources) -> bool:
+        self.rag_sources = sources
+        return True
+
+    def delete_doc(self, name: str) -> str:
+        self.deleted_doc = name
+        return f"Deleted {name}."
+
+    def save_uploaded_doc(self, filename: str, content: bytes) -> str:
+        self.uploaded = (filename, len(content))
+        return f"Saved {filename}."
+
+    def sessions_data(self) -> dict:
+        return {"active_session_id": "", "sessions": [{"id": "s1", "title": "Past"}]}
+
+    def get_tools_menu_data(self) -> dict:
+        return {
+            "catalog": "…",
+            "tool_defs": [{"name": "read_file", "risk": "read", "available": True}],
+            "allowlist": ["git status"],
+            "allow_shell": False,
+            "allow_write": False,
+            "tools_enabled": False,
+            "pending_count": 0,
+        }
+
+    def run_tool_test(self, name: str, args: dict):
+        return SimpleNamespace(success=True, summary=lambda n=4000: f"ran {name}")
+
+    def remove_shell_allowlist_entry(self, cmd: str) -> str:
+        return f"Removed {cmd}."
+
+    def board_data(self) -> dict:
+        return {"columns": [{"key": "backlog", "label": "Backlog", "tasks": []}]}
+
+    def agents_data(self, run_id: str = "") -> dict:
+        return {"enabled": False, "current": None, "runs": []}
+
+    def curator_data(self) -> dict:
+        return {"enabled": False, "findings": [], "active_skills": [], "archived_skills": []}
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -440,6 +496,69 @@ def test_router_help_catalog_and_topic() -> None:
     topic = router.dispatch("help", "models")
     assert topic.kind == "message"
     assert topic.text
+
+
+def test_domain_data_commands() -> None:
+    router = CommandRouter(FakeController())
+    checks = {
+        ("features", "data"): "features",
+        ("memory", "data"): "sections",
+        ("rag", "data"): "status",
+        ("sessions", "data"): "sessions",
+        ("tools", "data"): "tool_defs",
+        ("kanban", ""): "columns",
+        ("curator", "data"): "findings",
+        ("agents", "data"): "runs",
+    }
+    for (cmd, arg), key in checks.items():
+        result = router.dispatch(cmd, arg)
+        assert result.kind == "data", cmd
+        assert key in result.data, f"{cmd} missing {key}"
+
+
+def test_router_memory_set() -> None:
+    controller = FakeController()
+    result = CommandRouter(controller).dispatch("memory-set", "session\nnew content")
+    assert result.success is True
+    assert controller.saved_memory == ("session", "new content")
+
+
+def test_router_memory_set_bad_section() -> None:
+    result = CommandRouter(FakeController()).dispatch("memory-set", "bogus\nx")
+    assert result.success is False
+
+
+def test_router_rag_select_and_remove() -> None:
+    controller = FakeController()
+    router = CommandRouter(controller)
+    router.dispatch("rag", "select a.md,b.md")
+    assert controller.rag_sources == ["a.md", "b.md"]
+    router.dispatch("rag", "select all")
+    assert controller.rag_sources is None
+    router.dispatch("rag", "remove old.txt")
+    assert controller.deleted_doc == "old.txt"
+
+
+def test_router_tools_test_and_remove_shell() -> None:
+    router = CommandRouter(FakeController())
+    ok = router.dispatch("tools", 'test read_file {"path":"x"}')
+    assert "OK" in ok.text and "ran read_file" in ok.text
+    bad = router.dispatch("tools", "test read_file {not json}")
+    assert bad.success is False
+    rm = router.dispatch("tools", "remove-shell git status")
+    assert "Removed" in rm.text
+
+
+def test_rag_upload_endpoint() -> None:
+    controller = FakeController()
+    app = create_app(controller)
+    client = TestClient(app)
+    r = client.post(
+        "/api/rag/upload",
+        files={"document": ("notes.txt", b"hello docs", "text/plain")},
+    )
+    assert r.status_code == 200
+    assert controller.uploaded == ("notes.txt", 10)
 
 
 def test_router_models_info() -> None:

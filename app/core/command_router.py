@@ -16,6 +16,7 @@ is expected to call :meth:`CommandRouter.dispatch` inside a worker thread.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -120,7 +121,7 @@ class CommandRouter:
     # features
     def _features(self, args: str) -> CommandResult:
         c = self.controller
-        if not args:
+        if not args or args.strip().lower() == "data":
             return CommandResult.structured(
                 c.features.format_list(), {"features": c.features.as_dict()}
             )
@@ -191,7 +192,23 @@ class CommandRouter:
 
     # memory
     def _memory(self, args: str) -> CommandResult:
+        if args.strip().lower() == "data":
+            return CommandResult.structured(
+                "Memory sections.", self.controller.memory_sections()
+            )
         return CommandResult.message(self.controller.get_memory_view())
+
+    def _memory_set(self, args: str) -> CommandResult:
+        # First token = section, remainder (may span lines) = content.
+        head, _, content = args.partition("\n")
+        section = head.strip().lower()
+        if section not in ("user", "memory", "session"):
+            return CommandResult.error(
+                "Usage: /memory-set <user|memory|session>\\n<content>"
+            )
+        truncated = self.controller.save_memory(section, content)
+        note = " (truncated to the section limit)" if truncated else ""
+        return CommandResult.message(f"Saved {section} memory{note}.")
 
     def _memory_on(self, args: str) -> CommandResult:
         self.controller.enable_memory()
@@ -276,6 +293,8 @@ class CommandRouter:
 
     # curator
     def _curator(self, args: str) -> CommandResult:
+        if args.strip().lower() == "data":
+            return CommandResult.structured("Curator.", self.controller.curator_data())
         result = self.controller.run_curator_review()
         text = result.message or ""
         if getattr(result, "has_findings", False):
@@ -365,13 +384,33 @@ class CommandRouter:
     # rag
     def _rag(self, args: str) -> CommandResult:
         c = self.controller
-        sub = args.split()[0].lower() if args else ""
+        parts = args.split(maxsplit=1)
+        sub = parts[0].lower() if parts else ""
+        rest = parts[1] if len(parts) > 1 else ""
         if sub == "on":
             c.enable_rag()
             return CommandResult.message("RAG enabled.")
         if sub == "off":
             c.disable_rag()
             return CommandResult.message("RAG disabled.")
+        if sub == "data":
+            return CommandResult.structured(
+                "RAG data.",
+                {"status": c.get_rag_status(), "stats": c.get_rag_stats()},
+            )
+        if sub == "select":
+            if not rest.strip() or rest.strip().lower() == "all":
+                c.set_rag_sources(None)
+                return CommandResult.message("RAG using all sources.")
+            sources = [s.strip() for s in rest.split(",") if s.strip()]
+            ok = c.set_rag_sources(sources)
+            if not ok:
+                return CommandResult.error("Enable RAG first (/rag on).")
+            return CommandResult.message(f"RAG using {len(sources)} source(s).")
+        if sub == "remove":
+            if not rest.strip():
+                return CommandResult.error("Usage: /rag remove <filename>")
+            return CommandResult.message(c.delete_doc(rest.strip()))
         # Readable status (the old handler returned only the label "RAG status").
         status = c.get_rag_status()
         stats = c.get_rag_stats()
@@ -409,6 +448,8 @@ class CommandRouter:
         parts = args.split(maxsplit=1)
         sub = parts[0].lower() if parts else "list"
         rest = parts[1] if len(parts) > 1 else ""
+        if sub == "data":
+            return CommandResult.structured("Sessions.", c.sessions_data())
         if sub in ("", "list"):
             return CommandResult.message(c.list_sessions_view())
         if sub == "save":
@@ -440,6 +481,8 @@ class CommandRouter:
         parts = args.split(maxsplit=1)
         sub = parts[0].lower() if parts else "status"
         rest = parts[1] if len(parts) > 1 else ""
+        if sub == "data":
+            return CommandResult.structured("Agents.", c.agents_data(rest))
         if sub in ("", "status"):
             return CommandResult.message(c.get_agents_status(rest).message)
         if sub in ("on", "off"):
@@ -472,6 +515,8 @@ class CommandRouter:
         parts = args.split(maxsplit=1)
         sub = parts[0].lower()
         rest = parts[1] if len(parts) > 1 else ""
+        if sub == "data":
+            return CommandResult.structured("Tools.", c.get_tools_menu_data())
         if sub == "allowlist":
             return CommandResult.structured(
                 c.get_tools_status(),
@@ -479,10 +524,34 @@ class CommandRouter:
             )
         if sub == "add-shell":
             return CommandResult.message(c.add_shell_allowlist_entry(rest))
-        return CommandResult.error("Usage: /tools | /tools allowlist | /tools add-shell <cmd>")
+        if sub == "remove-shell":
+            return CommandResult.message(c.remove_shell_allowlist_entry(rest))
+        if sub == "test":
+            name_parts = rest.split(maxsplit=1)
+            if not name_parts:
+                return CommandResult.error("Usage: /tools test <name> '<json args>'")
+            name = name_parts[0]
+            raw = name_parts[1] if len(name_parts) > 1 else "{}"
+            try:
+                tool_args = json.loads(raw)
+            except json.JSONDecodeError as error:
+                return CommandResult.error(f"Invalid JSON: {error}")
+            if not isinstance(tool_args, dict):
+                return CommandResult.error("Tool args must be a JSON object.")
+            result = c.run_tool_test(name, tool_args)
+            status = "OK" if result.success else "FAILED"
+            return CommandResult.message(f"[{status}] {result.summary(4000)}")
+        return CommandResult.error(
+            "Usage: /tools | /tools allowlist | /tools add-shell <cmd> | "
+            "/tools remove-shell <cmd> | /tools test <name> '<json>'"
+        )
 
     def _tools_log(self, args: str) -> CommandResult:
         return CommandResult.message(self.controller.get_tool_log_view())
+
+    # kanban structured board
+    def _kanban(self, args: str) -> CommandResult:
+        return CommandResult.structured("Kanban board.", self.controller.board_data())
 
 
 _HANDLERS: dict[str, Handler] = {
@@ -507,6 +576,7 @@ _HANDLERS: dict[str, Handler] = {
     "memory-off": CommandRouter._memory_off,
     "memory-clear": CommandRouter._memory_clear,
     "memory-forget": CommandRouter._memory_forget,
+    "memory-set": CommandRouter._memory_set,
     "memory-analysis": CommandRouter._memory_analysis,
     "memory-search": CommandRouter._memory_analysis,
     "memory-edit": CommandRouter._memory_edit,
@@ -529,6 +599,7 @@ _HANDLERS: dict[str, Handler] = {
     "curator-ignore": CommandRouter._curator_ignore,
     # tasks
     "tasks": CommandRouter._tasks,
+    "kanban": CommandRouter._kanban,
     "task-new": CommandRouter._task_new,
     "task-move": CommandRouter._task_move,
     "task-done": CommandRouter._task_done,

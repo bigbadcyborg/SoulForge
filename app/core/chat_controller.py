@@ -594,6 +594,91 @@ class ChatController:
             },
         }
 
+    # -- structured domain data for the GUI menus -----------------------
+
+    def memory_sections(self) -> dict:
+        """Editable raw content + char limits for each memory section."""
+        limits = self.memory_manager.limits()
+        sections = {}
+        for name in ("user", "memory", "session"):
+            sections[name] = {
+                "content": self.memory_manager.read_raw(name),
+                "limit": limits[name],
+            }
+        return {
+            "injection_on": self.features.is_enabled("memory"),
+            "sections": sections,
+        }
+
+    def sessions_data(self) -> dict:
+        """Saved sessions with metadata for a picker."""
+        return {
+            "active_session_id": self.active_session_id,
+            "sessions": [meta.to_dict() for meta in self.session_manager.list_sessions()],
+        }
+
+    def board_data(self) -> dict:
+        """Kanban board as columns -> task dicts."""
+        board = self.task_manager.list_board()
+        return {
+            "columns": [
+                {
+                    "key": column,
+                    "label": COLUMN_LABELS.get(column, column),
+                    "tasks": [task.to_dict() for task in tasks],
+                }
+                for column, tasks in board.items()
+            ]
+        }
+
+    def agents_data(self, run_id: str = "") -> dict:
+        """Current agent run (tasks/checkpoints) + list of all runs."""
+        store = self.agent_manager.store
+        if run_id:
+            current = store.load(run_id)
+        elif self.agent_manager.active_run_id:
+            current = store.load(self.agent_manager.active_run_id) or store.latest()
+        else:
+            current = store.latest()
+        runs = [
+            {"run_id": r.run_id, "goal": r.goal, "status": r.status}
+            for r in store.list_runs()
+        ]
+        return {
+            "enabled": self.features.is_enabled("agents"),
+            "current": current.to_dict() if current is not None else None,
+            "runs": runs,
+        }
+
+    def curator_data(self) -> dict:
+        """Pending curator findings + active/archived skills."""
+        return {
+            "enabled": self.features.is_enabled("curator"),
+            "findings": [f.to_dict() for f in self.pending_curator_findings],
+            "active_skills": self.skill_manager.list_skills(status="active"),
+            "archived_skills": self.skill_manager.list_skills(status="archived"),
+        }
+
+    def save_uploaded_doc(self, filename: str, content: bytes) -> str:
+        """Write an uploaded document into the RAG docs folder (basename only)."""
+        safe = Path(filename).name  # strip any path components
+        if not safe or safe in (".", ".."):
+            raise ValueError("Invalid filename.")
+        docs_dir = self.config.rag.docs_dir
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        target = docs_dir / safe
+        target.write_bytes(content)
+        return f"Saved {safe} to docs/. Run ingest to index it."
+
+    def delete_doc(self, name: str) -> str:
+        """Delete a document from the RAG docs folder (basename only)."""
+        safe = Path(name).name
+        target = self.config.rag.docs_dir / safe
+        if not target.exists():
+            return f"Document not found: {safe}"
+        target.unlink()
+        return f"Deleted {safe} from docs/. Run ingest to update the index."
+
     def format_vision_view(self) -> str:
         """Human-readable current vision-model configuration."""
         v = self.config.vision

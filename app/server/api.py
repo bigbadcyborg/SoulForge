@@ -249,6 +249,14 @@ def create_app(controller: ChatController, transcriber=None) -> FastAPI:
         text = await run_in_threadpool(transcriber.transcribe_wav, data, language)
         return TranscribeResponse(text=text)
 
+    @app.post("/api/rag/upload", response_model=CommandResponse, dependencies=[Depends(auth)])
+    async def rag_upload(document: UploadFile = File(...)) -> CommandResponse:
+        data = await document.read()
+        text = await run_in_threadpool(
+            controller.save_uploaded_doc, document.filename or "document", data
+        )
+        return CommandResponse(kind="message", text=text, success=True)
+
     @app.websocket("/ws/chat")
     async def chat(websocket: WebSocket) -> None:
         token = controller.config.server.auth_token
