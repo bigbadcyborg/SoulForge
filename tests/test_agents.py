@@ -120,6 +120,35 @@ def test_parse_agent_envelope_requires_strict_shape() -> None:
     assert parsed.parent_task_id is None
 
 
+def test_parse_tolerates_trailing_and_extra_objects() -> None:
+    """Small models emit prose or a second object after the envelope."""
+    envelope = _envelope(role="creator", run_id="run_1", task_id="t1")
+
+    # 1. trailing prose after the object
+    parsed = parse_agent_envelope(envelope + "\n\nHope that helps!")
+    assert parsed.task_id == "t1"
+
+    # 2. leading prose before the object
+    parsed = parse_agent_envelope("Here is the envelope:\n" + envelope)
+    assert parsed.task_id == "t1"
+
+    # 3. a short fragment object emitted before the real envelope — the real
+    #    one wins because it carries more envelope keys
+    fragment = '{"schema_version": 1, "role": "creator"}'
+    parsed = parse_agent_envelope(fragment + "\n" + envelope)
+    assert parsed.task_id == "t1"
+    assert parsed.status == "pass"
+
+    # 4. fenced JSON surrounded by prose
+    parsed = parse_agent_envelope(f"Sure:\n```json\n{envelope}\n```\nDone.")
+    assert parsed.task_id == "t1"
+
+
+def test_parse_still_rejects_non_json() -> None:
+    with pytest.raises(AgentProtocolError):
+        parse_agent_envelope("no json at all here")
+
+
 def test_task_graph_validation_and_dependency_order() -> None:
     plan = parse_agent_envelope(
         _envelope(

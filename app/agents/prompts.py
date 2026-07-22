@@ -7,9 +7,12 @@ import json
 from app.agents.models import AgentRun, AgentTask
 
 JSON_RULES = (
-    "You are a SoulForge workflow agent. Return only one valid JSON object. "
-    "Do not include markdown fences, commentary, or prose outside JSON. "
-    "Every response must match AgentJsonEnvelope schema_version 1."
+    "You are a SoulForge workflow agent. Return exactly ONE complete JSON "
+    "object and nothing else — no second object, no markdown fences, no "
+    "commentary or prose before or after it. Every key of the envelope must be "
+    "in that single object; do not split it across multiple objects. Your reply "
+    "must start with '{' and end with '}'. It must match AgentJsonEnvelope "
+    "schema_version 1."
 )
 
 ENVELOPE_SHAPE = {

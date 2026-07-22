@@ -26,18 +26,61 @@ def _raw_json_text(text: str) -> str:
     match = _JSON_BLOCK_RE.fullmatch(stripped)
     if match:
         return match.group(1).strip()
+    # A fenced block may also sit inside surrounding prose.
+    match = _JSON_BLOCK_RE.search(stripped)
+    if match:
+        return match.group(1).strip()
     return stripped
+
+
+# Keys that mark a dict as an agent envelope rather than an incidental object.
+_ENVELOPE_KEYS = frozenset(
+    {"schema_version", "role", "run_id", "task_id", "status", "summary", "artifacts"}
+)
+
+
+def _iter_json_objects(text: str):
+    """Yield every top-level JSON object found in *text*, in order.
+
+    Small models often emit an object followed by prose, or split the envelope
+    across several objects. ``json.loads`` rejects all of that ("Extra data"),
+    so scan instead of demanding the whole string be one value.
+    """
+    decoder = json.JSONDecoder()
+    index = 0
+    length = len(text)
+    while index < length:
+        start = text.find("{", index)
+        if start == -1:
+            return
+        try:
+            obj, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            index = start + 1  # not a valid object here; keep scanning
+            continue
+        if isinstance(obj, dict):
+            yield obj
+        index = end
 
 
 def parse_json_object(text: str) -> dict[str, Any]:
     raw = _raw_json_text(text)
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise AgentProtocolError(f"Invalid JSON: {error}") from error
-    if not isinstance(data, dict):
+        if isinstance(data, dict):
+            return data
         raise AgentProtocolError("Agent response must be a JSON object.")
-    return data
+    except json.JSONDecodeError as error:
+        # Tolerate extra data / surrounding prose: pick the object that looks
+        # most like an envelope (most envelope keys, ties broken by size).
+        candidates = list(_iter_json_objects(raw))
+        if not candidates:
+            raise AgentProtocolError(f"Invalid JSON: {error}") from error
+        best = max(
+            candidates,
+            key=lambda obj: (len(_ENVELOPE_KEYS & obj.keys()), len(obj)),
+        )
+        return best
 
 
 def _string_list(value: Any, field_name: str) -> list[str]:
