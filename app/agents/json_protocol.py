@@ -63,12 +63,27 @@ def _iter_json_objects(text: str):
         index = end
 
 
+def _unwrap_envelope(obj: dict[str, Any]) -> dict[str, Any]:
+    """Return the envelope itself when a model nests it under a wrapper key.
+
+    Models sometimes reply {"envelope": {...}} or {"AgentJsonEnvelope": {...}};
+    prefer an inner object that looks more like the envelope than the outer one.
+    """
+    outer_score = len(_ENVELOPE_KEYS & obj.keys())
+    if outer_score >= 3:
+        return obj
+    for value in obj.values():
+        if isinstance(value, dict) and len(_ENVELOPE_KEYS & value.keys()) > outer_score:
+            return value
+    return obj
+
+
 def parse_json_object(text: str) -> dict[str, Any]:
     raw = _raw_json_text(text)
     try:
         data = json.loads(raw)
         if isinstance(data, dict):
-            return data
+            return _unwrap_envelope(data)
         raise AgentProtocolError("Agent response must be a JSON object.")
     except json.JSONDecodeError as error:
         # Tolerate extra data / surrounding prose: pick the object that looks
@@ -80,7 +95,7 @@ def parse_json_object(text: str) -> dict[str, Any]:
             candidates,
             key=lambda obj: (len(_ENVELOPE_KEYS & obj.keys()), len(obj)),
         )
-        return best
+        return _unwrap_envelope(best)
 
 
 def _string_list(value: Any, field_name: str) -> list[str]:
@@ -127,9 +142,13 @@ def parse_agent_envelope(
 ) -> AgentJsonEnvelope:
     data = parse_json_object(text)
 
-    schema_version = _int_value(data.get("schema_version"), 0, "schema_version")
+    # Models frequently drop this bookkeeping field. Absent means "current"
+    # rather than invalid; only an explicitly different version is an error.
+    schema_version = _int_value(data.get("schema_version"), 1, "schema_version")
     if schema_version != 1:
-        raise AgentProtocolError("schema_version must be 1.")
+        raise AgentProtocolError(
+            f"schema_version must be 1, got {schema_version}."
+        )
 
     role = str(data.get("role", "")).strip()
     if role not in AGENT_ROLES:

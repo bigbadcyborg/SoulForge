@@ -2132,6 +2132,25 @@ class ChatController:
         )
         return "\n".join(lines)
 
+    def set_tool_permission(self, name: str, enabled: bool) -> str:
+        """Grant/revoke a tool permission flag (allowShell/allowWrite/allowNetwork)."""
+        attrs = {
+            "shell": "allow_shell",
+            "allow-shell": "allow_shell",
+            "write": "allow_write",
+            "allow-write": "allow_write",
+            "network": "allow_network",
+            "allow-network": "allow_network",
+        }
+        attr = attrs.get(name.strip().lower())
+        if attr is None:
+            raise ValueError(
+                f"Unknown tool permission '{name}'. Use shell, write, or network."
+            )
+        setattr(self.config.tools, attr, enabled)
+        save_tools(self.config)
+        return f"tools.{attr} set to {enabled}. (saved to config.yaml)"
+
     def add_shell_allowlist_entry(self, command: str) -> str:
         command = command.strip()
         if not command:

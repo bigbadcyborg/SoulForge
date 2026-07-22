@@ -226,6 +226,13 @@ class FakeController:
     def remove_shell_allowlist_entry(self, cmd: str) -> str:
         return f"Removed {cmd}."
 
+    def set_tool_permission(self, name: str, enabled: bool) -> str:
+        if name not in ("shell", "write", "network"):
+            raise ValueError(f"Unknown tool permission '{name}'.")
+        self.permissions = getattr(self, "permissions", {})
+        self.permissions[name] = enabled
+        return f"tools.allow_{name} set to {enabled}."
+
     def board_data(self) -> dict:
         return {"columns": [{"key": "backlog", "label": "Backlog", "tasks": []}]}
 
@@ -573,6 +580,19 @@ def test_router_tools_test_and_remove_shell() -> None:
     assert bad.success is False
     rm = router.dispatch("tools", "remove-shell git status")
     assert "Removed" in rm.text
+
+
+def test_router_tools_allow_permission() -> None:
+    controller = FakeController()
+    router = CommandRouter(controller)
+    ok = router.dispatch("tools", "allow shell on")
+    assert ok.success is True
+    assert controller.permissions["shell"] is True
+    off = router.dispatch("tools", "allow network off")
+    assert controller.permissions["network"] is False
+    # bad usage / unknown permission
+    assert router.dispatch("tools", "allow shell").success is False
+    assert router.dispatch("tools", "allow bogus on").success is False
 
 
 def test_rag_upload_endpoint() -> None:

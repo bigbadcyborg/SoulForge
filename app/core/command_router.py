@@ -526,6 +526,19 @@ class CommandRouter:
             return CommandResult.message(c.add_shell_allowlist_entry(rest))
         if sub == "remove-shell":
             return CommandResult.message(c.remove_shell_allowlist_entry(rest))
+        if sub == "allow":
+            # /tools allow shell|write|network on|off
+            parts_allow = rest.split()
+            if len(parts_allow) != 2 or parts_allow[1].lower() not in ("on", "off"):
+                return CommandResult.error(
+                    "Usage: /tools allow shell|write|network on|off"
+                )
+            try:
+                return CommandResult.message(
+                    c.set_tool_permission(parts_allow[0], parts_allow[1].lower() == "on")
+                )
+            except ValueError as error:
+                return CommandResult.error(str(error))
         if sub == "test":
             name_parts = rest.split(maxsplit=1)
             if not name_parts:
@@ -543,7 +556,8 @@ class CommandRouter:
             return CommandResult.message(f"[{status}] {result.summary(4000)}")
         return CommandResult.error(
             "Usage: /tools | /tools allowlist | /tools add-shell <cmd> | "
-            "/tools remove-shell <cmd> | /tools test <name> '<json>'"
+            "/tools remove-shell <cmd> | /tools allow shell|write|network on|off | "
+            "/tools test <name> '<json>'"
         )
 
     def _tools_log(self, args: str) -> CommandResult:

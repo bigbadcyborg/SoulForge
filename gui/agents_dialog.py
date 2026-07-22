@@ -8,14 +8,16 @@ Requires PySide6 (Windows GUI venv).
 
 from __future__ import annotations
 
+import json
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTreeWidget,
@@ -154,6 +156,7 @@ class AgentsDialog(QDialog):
                      c.get("risk", "")],
                 )
                 item.setData(0, Qt.ItemDataRole.UserRole, c.get("checkpoint_id", ""))
+                item.setData(0, Qt.ItemDataRole.UserRole + 1, c)
         if run.get("final_answer"):
             self.log.setPlainText(run["final_answer"])
 
@@ -189,9 +192,78 @@ class AgentsDialog(QDialog):
         if not cid:
             self.status.setText("Select a pending checkpoint first.")
             return
+        if action == "approve" and not self._ensure_tool_permissions():
+            return  # user declined to grant the permission
         result = self.client.command("agents", f"{action} {cid}")
         self.log.setPlainText(result.get("text", ""))
         self._refresh()
+
+    def _selected_checkpoint_data(self) -> dict:
+        item = self.tree.currentItem()
+        if item is None:
+            return {}
+        return item.data(0, Qt.ItemDataRole.UserRole + 1) or {}
+
+    def _ensure_tool_permissions(self) -> bool:
+        """Prompt to grant the permissions this tool call needs before running it.
+
+        Returns True when it is safe to proceed (already permitted, or the user
+        granted it just now); False if the user declined.
+        """
+        checkpoint = self._selected_checkpoint_data()
+        call = checkpoint.get("tool_call", {}) or {}
+        tool = call.get("name", "")
+        if not tool:
+            return True
+        try:
+            tools = self.client.command("tools", "data").get("data", {})
+        except Exception:  # noqa: BLE001
+            return True  # can't check; let the server enforce it
+
+        needed: list[str] = []          # human-readable grants
+        actions: list[tuple[str, str]] = []  # (command, args) to apply
+        if not tools.get("tools_enabled"):
+            needed.append("• Enable the Tools feature")
+            actions.append(("features", "tools on"))
+
+        command = str(call.get("args", {}).get("command", "")).strip()
+        if tool == "run_command":
+            if not tools.get("allow_shell"):
+                needed.append("• Allow shell commands (tools.allowShell)")
+                actions.append(("tools", "allow shell on"))
+            allowlist = tools.get("allowlist", [])
+            if command and not any(command.startswith(p) for p in allowlist):
+                needed.append(f"• Add “{command}” to the shell allowlist")
+                actions.append(("tools", f"add-shell {command}"))
+        elif tool == "write_file" and not tools.get("allow_write"):
+            needed.append("• Allow file writes (tools.allowWrite)")
+            actions.append(("tools", "allow write on"))
+        elif tool == "fetch_url" and not tools.get("allow_network"):
+            needed.append("• Allow network access (tools.allowNetwork)")
+            actions.append(("tools", "allow network on"))
+
+        if not needed:
+            return True
+
+        detail = command or json.dumps(call.get("args", {}))
+        answer = QMessageBox.question(
+            self,
+            "Grant tool permission?",
+            f"The agent wants to run <b>{tool}</b>:<br><br>"
+            f"<code>{detail}</code><br><br>"
+            "That needs permissions you haven't granted:<br><br>"
+            + "<br>".join(needed)
+            + "<br><br>Grant these and approve? They are saved to config.yaml "
+            "and stay enabled until you turn them off.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.status.setText("Permission not granted — checkpoint left pending.")
+            return False
+        for name, args in actions:
+            self.client.command(name, args)
+        return True
 
     def _resume(self) -> None:
         try:

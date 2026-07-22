@@ -149,6 +149,34 @@ def test_parse_still_rejects_non_json() -> None:
         parse_agent_envelope("no json at all here")
 
 
+def test_missing_schema_version_defaults_to_1() -> None:
+    """Models routinely drop this bookkeeping field; absent != invalid."""
+    raw = json.dumps(
+        {
+            "role": "creator",
+            "run_id": "run_1",
+            "task_id": "t1",
+            "status": "pass",
+            "summary": "ok",
+        }
+    )
+    parsed = parse_agent_envelope(raw, expected_run_id="run_1", expected_role="creator")
+    assert parsed.schema_version == 1
+
+    # An explicitly wrong version is still rejected.
+    with pytest.raises(AgentProtocolError, match="schema_version"):
+        parse_agent_envelope(json.dumps({"schema_version": 2, "role": "creator",
+                                         "run_id": "r", "task_id": "t",
+                                         "status": "pass"}))
+
+
+def test_parse_unwraps_nested_envelope() -> None:
+    inner = json.loads(_envelope(role="creator", run_id="run_1", task_id="t1"))
+    wrapped = json.dumps({"envelope": inner})
+    parsed = parse_agent_envelope(wrapped, expected_run_id="run_1", expected_role="creator")
+    assert parsed.task_id == "t1"
+
+
 def test_task_graph_validation_and_dependency_order() -> None:
     plan = parse_agent_envelope(
         _envelope(
