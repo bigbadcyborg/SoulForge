@@ -2106,6 +2106,51 @@ class ChatController:
             )
         return self.agent_manager.cancel_run(run_id)
 
+    def preload_agent_models(
+        self, *, on_progress: Callable[[str], None] | None = None
+    ) -> str:
+        """Load the models a run needs up front instead of during the run.
+
+        The planner's profile is what makes a run appear to hang: it is usually
+        a large swap model that only loads once planning starts. Resident
+        worker profiles are warmed too, but only when the planner is itself
+        resident -- a swap planner evicts everything as it loads, so warming
+        them first would just throw the work away (the run re-warms them after
+        planning, which is where they belong).
+        """
+        role = self.config.agents.roles.get("orchestrator")
+        planner = (
+            role.model_profile if role else self.config.agents.default_profile
+        )
+        planner_swaps = (
+            self.config.agents.model_profiles.get(planner) is not None
+            and self.config.agents.model_profiles[planner].residency == "swap"
+        )
+
+        lines: list[str] = []
+        if not planner_swaps:
+            if on_progress:
+                on_progress("Warming resident agent profiles…")
+            for warning in self.runtime.warm_resident_profiles():
+                lines.append(warning)
+
+        if on_progress:
+            on_progress(f"Loading planner profile '{planner}'…")
+        try:
+            self.runtime.load_chat_profile(planner)
+            lines.append(f"Planner profile '{planner}' loaded.")
+        except Exception as error:  # noqa: BLE001
+            lines.append(f"Planner profile '{planner}' failed to load: {error}")
+
+        if planner_swaps:
+            lines.append(
+                f"'{planner}' is a swap profile: it evicts the worker models "
+                "while it plans, and they reload afterwards."
+            )
+        loaded = [s.name for s in self.runtime.profile_statuses() if s.loaded]
+        lines.append(f"Loaded profiles: {', '.join(loaded) or 'none'}")
+        return "\n".join(lines)
+
     def resume_agent_run(
         self, run_id: str = "", *, on_progress: Callable[[str], None] | None = None
     ) -> AgentActionResult:

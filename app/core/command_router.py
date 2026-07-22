@@ -488,6 +488,8 @@ class CommandRouter:
         if sub in ("on", "off"):
             c.set_feature("agents", sub == "on")
             return CommandResult.message(f"Agents set to {sub}.")
+        if sub == "load":
+            return CommandResult.message(c.preload_agent_models())
         if sub == "run":
             return CommandResult.message(c.run_agent_workflow(rest).message)
         if sub == "resume":
@@ -504,7 +506,7 @@ class CommandRouter:
             spec = edit[1] if len(edit) > 1 else ""
             return CommandResult.message(c.edit_agent_task(task_id, spec).message)
         return CommandResult.error(
-            "Usage: /agents status|on|off|run|resume|cancel|approve|reject|edit [arg]"
+            "Usage: /agents status|on|off|load|run|resume|cancel|approve|reject|edit [arg]"
         )
 
     # tools

@@ -150,14 +150,21 @@ def parse_agent_envelope(
             f"schema_version must be 1, got {schema_version}."
         )
 
+    # role/run_id/task_id are bookkeeping the caller already knows. When the
+    # model omits one, filling it in beats discarding an otherwise good plan;
+    # only a value that contradicts the expectation is a real error.
     role = str(data.get("role", "")).strip()
+    if not role and expected_role:
+        role = expected_role
     if role not in AGENT_ROLES:
-        raise AgentProtocolError(f"role must be one of: {', '.join(AGENT_ROLES)}.")
+        raise AgentProtocolError(
+            f"role must be one of: {', '.join(AGENT_ROLES)}; got '{role}'."
+        )
     if expected_role and role != expected_role:
         raise AgentProtocolError(f"role must be '{expected_role}', got '{role}'.")
 
-    run_id = str(data.get("run_id", "")).strip()
-    task_id = str(data.get("task_id", "")).strip()
+    run_id = str(data.get("run_id", "")).strip() or (expected_run_id or "")
+    task_id = str(data.get("task_id", "")).strip() or (expected_task_id or "")
     if not run_id:
         raise AgentProtocolError("run_id is required.")
     if not task_id:

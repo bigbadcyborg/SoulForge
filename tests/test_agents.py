@@ -170,6 +170,29 @@ def test_missing_schema_version_defaults_to_1() -> None:
                                          "status": "pass"}))
 
 
+def test_missing_bookkeeping_fields_fall_back_to_expected() -> None:
+    """A planner that omits role/run_id/task_id still produced a usable plan."""
+    raw = json.dumps({"status": "pass", "summary": "ok"})
+    parsed = parse_agent_envelope(
+        raw,
+        expected_run_id="run_1",
+        expected_task_id="plan",
+        expected_role="orchestrator",
+    )
+    assert parsed.role == "orchestrator"
+    assert parsed.run_id == "run_1"
+    assert parsed.task_id == "plan"
+
+
+def test_unknown_role_is_rejected_and_names_the_value() -> None:
+    """Guessing a wrong role is an error, and the message must be diagnosable."""
+    raw = json.dumps(
+        {"role": "planner", "run_id": "r", "task_id": "t", "status": "pass"}
+    )
+    with pytest.raises(AgentProtocolError, match="got 'planner'"):
+        parse_agent_envelope(raw, expected_role="orchestrator")
+
+
 def test_parse_unwraps_nested_envelope() -> None:
     inner = json.loads(_envelope(role="creator", run_id="run_1", task_id="t1"))
     wrapped = json.dumps({"envelope": inner})

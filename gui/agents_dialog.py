@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from gui.api_client import ApiClient
+from gui.streaming import CommandWorker
 
 
 class AgentsDialog(QDialog):
@@ -52,9 +53,16 @@ class AgentsDialog(QDialog):
         run_row = QHBoxLayout()
         self.goal_edit = QLineEdit()
         self.goal_edit.setPlaceholderText("Goal for the agent run…")
+        self.load_btn = QPushButton("Load Agents")
+        self.load_btn.setToolTip(
+            "Load the planner model now so clicking Run does not stall while a "
+            "large model loads."
+        )
+        self.load_btn.clicked.connect(self._load_models)
         self.run_btn = QPushButton("Run")
         self.run_btn.clicked.connect(self._run)
         run_row.addWidget(self.goal_edit, stretch=1)
+        run_row.addWidget(self.load_btn)
         run_row.addWidget(self.run_btn)
         layout.addLayout(run_row)
 
@@ -163,6 +171,28 @@ class AgentsDialog(QDialog):
     def _toggle_enabled(self, state: bool) -> None:
         self.client.command("agents", "on" if state else "off")
         self._refresh()
+
+    def _load_models(self) -> None:
+        """Pay the model-load cost up front rather than inside the first run."""
+        self.load_btn.setEnabled(False)
+        self.run_btn.setEnabled(False)
+        self.status.setText("⏳ loading agent models… this can take a few minutes.")
+        worker = CommandWorker(self.client, "agents", "load")
+        worker.done.connect(lambda r: self.log.setPlainText(r.get("text", "")))
+        worker.error.connect(lambda t: self.log.setPlainText(f"Load failed: {t}"))
+        worker.finished.connect(lambda: self._load_finished(worker))
+        self._workers.append(worker)
+        worker.start()
+
+    def _load_finished(self, worker) -> None:
+        self._drop(worker)
+        self.load_btn.setEnabled(True)
+        self.run_btn.setEnabled(True)
+        self.status.setText("Agent models loaded. Run a goal, or select a saved run below.")
+
+    def _drop(self, worker) -> None:
+        if worker in self._workers:
+            self._workers.remove(worker)
 
     def _run(self) -> None:
         goal = self.goal_edit.text().strip()

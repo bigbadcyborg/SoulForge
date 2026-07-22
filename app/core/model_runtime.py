@@ -141,6 +141,11 @@ class ModelRuntime:
                 break
         return warnings
 
+    def load_chat_profile(self, profile_name: str) -> None:
+        """Load one named profile now, so a later call does not pay for it."""
+        with self._lock:
+            self._load_chat_profile_unlocked(profile_name)
+
     def profile_statuses(self) -> list[RuntimeProfileStatus]:
         """Return loaded/unloaded state for configured runtime profiles."""
         statuses = [

@@ -23,6 +23,9 @@ chromaDb/
 # Saved conversation sessions (user data)
 app/sessions/*.json
 
+# Agent run records (generated; contain goals and model output)
+app/agents/runs/*.json
+
 # Application logs
 logs/*.log
 logs/tool_calls.jsonl

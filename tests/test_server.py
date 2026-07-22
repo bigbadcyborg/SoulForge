@@ -248,6 +248,10 @@ class FakeController:
     def resume_agent_run(self, run_id: str = "", *, on_progress=None):
         return SimpleNamespace(success=True, message="resumed")
 
+    def preload_agent_models(self, *, on_progress=None) -> str:
+        self.preloaded = True
+        return "Planner profile 'orchestrator' loaded."
+
     def curator_data(self) -> dict:
         return {"enabled": False, "findings": [], "active_skills": [], "archived_skills": []}
 
@@ -263,6 +267,13 @@ def test_ping(client: TestClient) -> None:
     body = r.json()
     assert body["model"] == "test.gguf"
     assert body["ready"] is True
+
+
+def test_agents_load_preloads_models(client: TestClient) -> None:
+    """The Load Agents button warms the planner before a run needs it."""
+    r = client.post("/api/command", json={"name": "agents", "args": "load"})
+    assert r.status_code == 200
+    assert "orchestrator" in r.json()["text"]
 
 
 def test_shutdown_replies_then_stops(monkeypatch: pytest.MonkeyPatch) -> None:

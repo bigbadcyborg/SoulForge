@@ -150,7 +150,11 @@ class AgentManager:
                 self._execute_run(run)
             except Exception as error:  # noqa: BLE001
                 run.status = "blocked"
-                run.results.append(self._error_result(str(error)))
+                run.results.append(
+                    self._error_result(
+                        str(error), getattr(error, "raw_response", "")
+                    )
+                )
                 self.store.save(run)
                 warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
                 return AgentActionResult(
@@ -200,7 +204,11 @@ class AgentManager:
                 self._execute_run(run)
             except Exception as error:  # noqa: BLE001
                 run.status = "blocked"
-                run.results.append(self._error_result(str(error)))
+                run.results.append(
+                    self._error_result(
+                        str(error), getattr(error, "raw_response", "")
+                    )
+                )
                 self.store.save(run)
                 warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
                 return AgentActionResult(
@@ -462,8 +470,11 @@ class AgentManager:
                     expected_task_id=task_id,
                     expected_role=role,
                 )
-            except AgentProtocolError:
+            except AgentProtocolError as repair_error:
                 if self.config.agents.strict_json:
+                    # Carry the offending text out with the error; without it the
+                    # blocked run records only the complaint, not what caused it.
+                    repair_error.raw_response = (repair_raw or raw).strip()
                     raise
                 # Lenient mode: accept the raw text as the task result rather
                 # than blocking the run on a schema failure.
@@ -852,7 +863,7 @@ class AgentManager:
         }
 
     @staticmethod
-    def _error_result(message: str):
+    def _error_result(message: str, raw: str = ""):
         from app.agents.models import AgentResult
 
         return AgentResult(
@@ -861,4 +872,5 @@ class AgentManager:
             status="blocked",
             summary=message,
             errors=[message],
+            raw=raw[:4000],
         )
