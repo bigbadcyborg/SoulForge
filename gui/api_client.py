@@ -91,6 +91,12 @@ class ApiClient:
         resp.raise_for_status()
         return resp.json()
 
+    def shutdown(self) -> dict[str, Any]:
+        """Ask the server to unload models and stop. Short timeout: it dies mid-call."""
+        resp = self._http.post("/api/shutdown", headers=self._headers(), timeout=10.0)
+        resp.raise_for_status()
+        return resp.json()
+
     def agents_state(self) -> dict[str, Any]:
         resp = self._http.get("/api/agents/state", headers=self._headers())
         resp.raise_for_status()

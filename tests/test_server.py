@@ -265,6 +265,21 @@ def test_ping(client: TestClient) -> None:
     assert body["ready"] is True
 
 
+def test_shutdown_replies_then_stops(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The endpoint must answer before the process is asked to exit."""
+    from app.server import api as api_module
+
+    stopped: list[object] = []
+    monkeypatch.setattr(api_module, "_request_stop", stopped.append)
+
+    client = TestClient(create_app(FakeController()))
+    r = client.post("/api/shutdown")
+
+    assert r.status_code == 200
+    assert r.json()["stopping"] is True
+    assert len(stopped) == 1
+
+
 def test_commands_listing(client: TestClient) -> None:
     r = client.get("/api/commands")
     assert r.status_code == 200

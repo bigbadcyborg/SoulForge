@@ -37,6 +37,7 @@ from app.server.schemas import (
     PingResponse,
     SessionStartRequest,
     SessionStartResponse,
+    ShutdownResponse,
     SnapshotResponse,
     TranscribeResponse,
 )
@@ -152,6 +153,29 @@ def run_session_load(controller: ChatController, request, state: dict) -> None:
         state["loading"] = False
 
 
+def _request_stop(controller: ChatController) -> None:
+    """Release the models, then signal uvicorn to shut down.
+
+    Runs on a background thread so the HTTP response reaches the GUI before the
+    process goes away. Tests patch this out — it terminates the interpreter.
+    """
+
+    def stop() -> None:
+        import os
+        import signal
+        import time
+
+        time.sleep(0.4)  # let the response flush first
+        try:
+            controller.runtime.unload_chat_model()
+            controller.runtime.unload_vision_model()
+        except Exception:  # noqa: BLE001 - going down regardless
+            pass
+        os.kill(os.getpid(), signal.SIGTERM)  # uvicorn handles this gracefully
+
+    threading.Thread(target=stop, daemon=True).start()
+
+
 def create_app(controller: ChatController, transcriber=None) -> FastAPI:
     """Build the FastAPI app bound to a ready ChatController.
 
@@ -233,6 +257,16 @@ def create_app(controller: ChatController, transcriber=None) -> FastAPI:
             result=agent_state["result"],
             data=data,
         )
+
+    @app.post(
+        "/api/shutdown",
+        response_model=ShutdownResponse,
+        dependencies=[Depends(auth)],
+    )
+    async def shutdown() -> ShutdownResponse:
+        """Release the models and stop the server, replying before it exits."""
+        _request_stop(controller)
+        return ShutdownResponse(stopping=True, message="Server shutting down.")
 
     @app.get("/api/ping", response_model=PingResponse)
     async def ping() -> PingResponse:

@@ -10,12 +10,14 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QTextCursor, QTextOption
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTextEdit,
@@ -57,6 +59,7 @@ class ChatWindow(QMainWindow):
         self._assistant_anchor: int | None = None
 
         self._was_ready = False
+        self._has_chatted = False
         self.setWindowTitle("SoulForge")
         self.resize(900, 640)
         self._build_ui()
@@ -123,6 +126,12 @@ class ChatWindow(QMainWindow):
         self.transcribe_btn.clicked.connect(self.trigger_transcribe)
         right.addWidget(self.snapshot_btn)
         right.addWidget(self.transcribe_btn)
+        exit_btn = QPushButton("Safe Exit")
+        exit_btn.setToolTip(
+            "Save your conversation, release the models, and close cleanly."
+        )
+        exit_btn.clicked.connect(self._safe_exit)
+        right.addWidget(exit_btn)
 
         layout.addLayout(left, stretch=3)
         layout.addLayout(right, stretch=1)
@@ -180,6 +189,7 @@ class ChatWindow(QMainWindow):
             self._send_command(text)
             return
         self._append("You", text)
+        self._has_chatted = True  # Safe Exit offers to save only real conversations
         self.input.setEnabled(False)
         self.send_btn.setEnabled(False)
 
@@ -328,6 +338,77 @@ class ChatWindow(QMainWindow):
 
         AgentsDialog(self.client, self).exec()
 
+    # -- safe exit --------------------------------------------------------
+
+    def _busy_reason(self) -> str:
+        """Describe any work still in flight, or '' when idle."""
+        try:
+            if self.client.ping().get("loading"):
+                return "Models are still loading."
+        except Exception:  # noqa: BLE001
+            return ""  # server unreachable; nothing to wait for
+        try:
+            if self.client.agents_state().get("running"):
+                return "An agent run is still in progress."
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
+    def _safe_exit(self) -> None:
+        busy = self._busy_reason()
+        if busy:
+            answer = QMessageBox.question(
+                self,
+                "Still working",
+                f"{busy}\n\nExit anyway? The work in progress will be lost.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        # Offer to keep the conversation (only if there is one).
+        if self._has_chatted:
+            answer = QMessageBox.question(
+                self,
+                "Save conversation?",
+                "Save this conversation as a session before exiting?",
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer == QMessageBox.StandardButton.Cancel:
+                return
+            if answer == QMessageBox.StandardButton.Yes:
+                try:
+                    self.client.command("session-save", "")
+                except Exception as error:  # noqa: BLE001
+                    QMessageBox.warning(self, "Save failed", str(error))
+
+        stop_server = QMessageBox.question(
+            self,
+            "Shut down the server?",
+            "Also stop the SoulForge server in WSL?\n\n"
+            "Yes — releases the loaded models and frees GPU memory.\n"
+            "No — leaves it running so the next start is instant.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+
+        self._status_timer.stop()
+        if stop_server == QMessageBox.StandardButton.Yes:
+            self.status_label.setText("Shutting down the server…")
+            try:
+                self.client.shutdown()
+            except Exception:  # noqa: BLE001
+                # The server dies mid-request, so a transport error here is
+                # expected and means it is going down as asked.
+                pass
+
+        self.client.close()
+        QApplication.quit()
+
     def _show_result(self, title: str, text: str) -> None:
         # Scrollable, selectable dialog so long output (e.g. /help) is fully
         # readable instead of being clipped by a message box.
@@ -422,5 +503,8 @@ class ChatWindow(QMainWindow):
         self.input.setFocus()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        # Closing the window leaves the WSL server (and its models) running;
+        # "Safe Exit" is the path that also shuts the backend down.
+        self._status_timer.stop()
         self.client.close()
         super().closeEvent(event)

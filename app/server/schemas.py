@@ -57,6 +57,11 @@ class AgentStateResponse(BaseModel):
     data: dict = {}
 
 
+class ShutdownResponse(BaseModel):
+    stopping: bool
+    message: str = ""
+
+
 class SnapshotResponse(BaseModel):
     text: str
     success: bool = True
