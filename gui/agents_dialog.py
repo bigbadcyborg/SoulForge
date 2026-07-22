@@ -115,11 +115,13 @@ class AgentsDialog(QDialog):
             self.status.setText(f"Lost contact with server: {error}")
             self._poll.stop()
             self.run_btn.setEnabled(True)
+            self.load_btn.setEnabled(True)
             return
         self._apply_state(state)
         if not state.get("running"):
             self._poll.stop()
             self.run_btn.setEnabled(True)
+            self.load_btn.setEnabled(True)
             if state.get("result"):
                 self.log.setPlainText(state["result"])
 
@@ -209,6 +211,9 @@ class AgentsDialog(QDialog):
         self.log.setPlainText("")
         self.status.setText("⏳ starting…")
         self.run_btn.setEnabled(False)
+        # Loading a profile mid-run would fight the run for the runtime lock and
+        # could evict the models it is using.
+        self.load_btn.setEnabled(False)
         self._poll.start()
 
     def _selected_checkpoint(self) -> str:

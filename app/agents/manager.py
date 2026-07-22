@@ -143,25 +143,20 @@ class AgentManager:
                     )
                 self._emit(f"● plan ready: {len(run.tasks)} task(s)")
                 self.store.save(run)
-                # Warm residents only after planning: the orchestrator's swap
-                # profile evicts every other loaded profile, so warming earlier
-                # would load the worker models just to throw them away.
-                warnings = self.runtime.warm_resident_profiles()
+            except Exception as error:  # noqa: BLE001
+                return self._blocked(run, "planning", error, warnings)
+
+            # Warm residents only after planning: the orchestrator's swap
+            # profile evicts every other loaded profile, so warming earlier
+            # would load the worker models just to throw them away.
+            warnings = self.runtime.warm_resident_profiles()
+            try:
                 self._execute_run(run)
             except Exception as error:  # noqa: BLE001
-                run.status = "blocked"
-                run.results.append(
-                    self._error_result(
-                        str(error), getattr(error, "raw_response", "")
-                    )
-                )
-                self.store.save(run)
-                warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
-                return AgentActionResult(
-                    False,
-                    f"Agent run blocked during planning: {error}{warning_text}",
-                    run,
-                )
+                # Kept separate from planning: a failure here means the plan was
+                # fine and a task or the synthesis step broke, and saying
+                # "during planning" sends you looking in the wrong place.
+                return self._blocked(run, "execution", error, warnings)
 
             return self._run_outcome(run, warnings)
         finally:
@@ -203,19 +198,7 @@ class AgentManager:
             try:
                 self._execute_run(run)
             except Exception as error:  # noqa: BLE001
-                run.status = "blocked"
-                run.results.append(
-                    self._error_result(
-                        str(error), getattr(error, "raw_response", "")
-                    )
-                )
-                self.store.save(run)
-                warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
-                return AgentActionResult(
-                    False,
-                    f"Agent run blocked while resuming: {error}{warning_text}",
-                    run,
-                )
+                return self._blocked(run, "resume", error, warnings)
 
             return self._run_outcome(run, warnings)
         finally:
@@ -861,6 +844,18 @@ class AgentManager:
             "error": result.error,
             "status": result.status,
         }
+
+    def _blocked(self, run, phase: str, error: Exception, warnings: list[str]):
+        """Record a blocked run, naming the phase that actually failed."""
+        run.status = "blocked"
+        run.results.append(
+            self._error_result(str(error), getattr(error, "raw_response", ""))
+        )
+        self.store.save(run)
+        warning_text = ("\n" + "\n".join(warnings)) if warnings else ""
+        return AgentActionResult(
+            False, f"Agent run blocked during {phase}: {error}{warning_text}", run
+        )
 
     @staticmethod
     def _error_result(message: str, raw: str = ""):

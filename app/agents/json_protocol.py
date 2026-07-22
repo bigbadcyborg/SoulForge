@@ -33,6 +33,34 @@ def _raw_json_text(text: str) -> str:
     return stripped
 
 
+# Everyday words models reach for instead of the exact status token. The task
+# vocabulary uses "passed" while envelopes use "pass", so even a model copying
+# our own wording lands here. Mapping these beats discarding finished work.
+_STATUS_SYNONYMS = {
+    "passed": "pass",
+    "ok": "pass",
+    "okay": "pass",
+    "success": "pass",
+    "successful": "pass",
+    "succeeded": "pass",
+    "complete": "pass",
+    "completed": "pass",
+    "done": "pass",
+    "revised": "revise",
+    "revision": "revise",
+    "needs_revision": "revise",
+    "retry": "revise",
+    "fail": "blocked",
+    "failed": "blocked",
+    "error": "blocked",
+    "block": "blocked",
+    "tool": "tool_requested",
+    "tool_call": "tool_requested",
+    "tool_request": "tool_requested",
+    "tool_use": "tool_requested",
+}
+
+
 # Keys that mark a dict as an agent envelope rather than an incidental object.
 _ENVELOPE_KEYS = frozenset(
     {"schema_version", "role", "run_id", "task_id", "status", "summary", "artifacts"}
@@ -176,10 +204,12 @@ def parse_agent_envelope(
             f"task_id must be '{expected_task_id}', got '{task_id}'."
         )
 
-    status = str(data.get("status", "")).strip()
+    status = str(data.get("status", "")).strip().lower()
+    status = _STATUS_SYNONYMS.get(status, status)
     if status not in ENVELOPE_STATUSES:
         raise AgentProtocolError(
-            f"status must be one of: {', '.join(ENVELOPE_STATUSES)}."
+            f"status must be one of: {', '.join(ENVELOPE_STATUSES)}; "
+            f"got '{status}'."
         )
 
     parent_task_id = data.get("parent_task_id")

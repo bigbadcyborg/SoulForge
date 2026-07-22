@@ -184,6 +184,28 @@ def test_missing_bookkeeping_fields_fall_back_to_expected() -> None:
     assert parsed.task_id == "plan"
 
 
+def test_status_synonyms_are_accepted() -> None:
+    """Our own task vocabulary says "passed"; envelopes want "pass"."""
+    for written, expected in [
+        ("passed", "pass"),
+        ("COMPLETED", "pass"),
+        ("failed", "blocked"),
+        ("tool_call", "tool_requested"),
+    ]:
+        raw = json.dumps(
+            {"role": "critic", "run_id": "r", "task_id": "t", "status": written}
+        )
+        assert parse_agent_envelope(raw).status == expected
+
+
+def test_unrecognised_status_is_rejected_and_names_the_value() -> None:
+    raw = json.dumps(
+        {"role": "critic", "run_id": "r", "task_id": "t", "status": "banana"}
+    )
+    with pytest.raises(AgentProtocolError, match="got 'banana'"):
+        parse_agent_envelope(raw)
+
+
 def test_unknown_role_is_rejected_and_names_the_value() -> None:
     """Guessing a wrong role is an error, and the message must be diagnosable."""
     raw = json.dumps(
