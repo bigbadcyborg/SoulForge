@@ -37,6 +37,19 @@ ENVELOPE_SHAPE = {
 }
 
 
+def envelope_example(role: str, run_id: str, task_id: str) -> dict:
+    """ENVELOPE_SHAPE with the role/run_id/task_id this caller must actually use.
+
+    The generic shape hardcodes role "creator"; smaller models copy it verbatim
+    and fail envelope validation ("role must be 'executor', got 'creator'").
+    """
+    example = dict(ENVELOPE_SHAPE)
+    example["role"] = role
+    example["run_id"] = run_id
+    example["task_id"] = task_id
+    return example
+
+
 ROLE_DESCRIPTIONS: dict[str, str] = {
     "orchestrator": (
         "Break the user goal into a dependency-ordered task graph and make "
@@ -73,21 +86,84 @@ def orchestrator_messages(run: AgentRun, max_iterations: int) -> list[dict[str, 
         "You are the orchestrator. Build a minimal dependency-ordered task graph. "
         "Use only these worker roles: researcher, creator, executor, critic, "
         "synthesizer. Include parent_task_id when a task refines a prior task. "
-        "Do not create unrelated sibling dependencies. Put the graph in an "
-        "artifact with type='task_graph' and a tasks array. Use context_pruning "
+        "Do not create unrelated sibling dependencies. Use context_pruning "
         "to scope each task's context: set include_rag true for tasks that need "
         "indexed documents, include_memory true for tasks that depend on stored "
         "user/project facts, and include_skills true when a task should know "
-        "which local skills exist."
+        "which local skills exist.\n"
+        "REQUIRED: 'artifacts' must contain exactly one object with "
+        "\"type\": \"task_graph\" and a non-empty \"tasks\" array. An empty "
+        "artifacts array is invalid and the run will fail."
     )
     user = (
         f"Run ID: {run.run_id}\n"
         f"Goal:\n{run.goal}\n\n"
-        "Return an AgentJsonEnvelope for task_id 'plan'. The artifact task item "
-        f"shape is:\n{json.dumps(task_schema, indent=2)}\n\n"
-        f"Envelope example:\n{json.dumps(ENVELOPE_SHAPE, indent=2)}"
+        "Return one AgentJsonEnvelope for task_id 'plan'. Each task item uses "
+        f"this shape:\n{json.dumps(task_schema, indent=2)}\n\n"
+        "Copy this structure exactly, replacing the example tasks with tasks "
+        "for the goal above:\n"
+        f"{json.dumps(orchestrator_example_envelope(run, max_iterations), indent=2)}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def orchestrator_example_envelope(run: AgentRun, max_iterations: int) -> dict:
+    """A fully populated planner envelope to show the model what to emit.
+
+    The generic ENVELOPE_SHAPE has an empty ``artifacts`` list, which smaller
+    models copy verbatim — producing a plan with no task_graph. This example
+    carries a real task_graph so the required shape is unambiguous.
+    """
+    def _task(task_id: str, role: str, title: str, deps: list[str]) -> dict:
+        return {
+            "id": task_id,
+            "role": role,
+            "title": title,
+            "instructions": f"({title} — concrete instructions for the goal)",
+            "dependencies": deps,
+            "success_criteria": "Objective, checkable criteria.",
+            "parent_task_id": None,
+            "context_pruning": ENVELOPE_SHAPE["context_pruning"],
+            "input_spec": "",
+            "max_attempts": max_iterations,
+        }
+
+    return {
+        "schema_version": 1,
+        "role": "orchestrator",
+        "run_id": run.run_id,
+        "task_id": "plan",
+        "parent_task_id": None,
+        "context_pruning": ENVELOPE_SHAPE["context_pruning"],
+        "status": "pass",
+        "summary": "Task graph for the goal.",
+        "artifacts": [
+            {
+                "type": "task_graph",
+                "tasks": [
+                    _task("step1", "executor", "First step", []),
+                    _task("step2", "synthesizer", "Summarize the result", ["step1"]),
+                ],
+            }
+        ],
+        "tool_requests": [],
+        "next_actions": [],
+        "errors": [],
+    }
+
+
+def planner_retry_messages(
+    run: AgentRun, max_iterations: int, error: str
+) -> list[dict[str, str]]:
+    """Re-ask the orchestrator after an unusable plan, naming what was wrong."""
+    base = orchestrator_messages(run, max_iterations)
+    correction = (
+        f"Your previous plan was rejected: {error}\n\n"
+        "Return the envelope again. The 'artifacts' array MUST contain an "
+        'object {"type": "task_graph", "tasks": [ ... ]} with at least one '
+        "task. Output only the JSON object."
+    )
+    return base + [{"role": "user", "content": correction}]
 
 
 def task_messages(run: AgentRun, task: AgentTask, context: str) -> list[dict[str, str]]:
@@ -108,7 +184,9 @@ def task_messages(run: AgentRun, task: AgentTask, context: str) -> list[dict[str
         f"Manual input spec:\n{task.input_spec or '(none)'}\n\n"
         f"Success criteria:\n{task.success_criteria or '(none)'}\n\n"
         f"Scoped context:\n{context or '(none)'}\n\n"
-        f"Return this envelope shape:\n{json.dumps(ENVELOPE_SHAPE, indent=2)}"
+        "Return exactly this envelope shape (keep role, run_id and task_id as "
+        "shown):\n"
+        f"{json.dumps(envelope_example(task.role, run.run_id, task.id), indent=2)}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -125,7 +203,9 @@ def critic_messages(run: AgentRun, context: str) -> list[dict[str, str]]:
         f"Run ID: {run.run_id}\n"
         f"Goal:\n{run.goal}\n\n"
         f"Run context:\n{context}\n\n"
-        "Return an AgentJsonEnvelope with role critic and task_id 'critic'."
+        "Return exactly this envelope shape (keep role, run_id and task_id as "
+        "shown):\n"
+        f"{json.dumps(envelope_example('critic', run.run_id, 'critic'), indent=2)}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -141,7 +221,9 @@ def synthesizer_messages(run: AgentRun, context: str) -> list[dict[str, str]]:
         f"Run ID: {run.run_id}\n"
         f"Goal:\n{run.goal}\n\n"
         f"Passed run context:\n{context}\n\n"
-        "Return an AgentJsonEnvelope with role synthesizer and task_id 'final'."
+        "Return exactly this envelope shape (keep role, run_id and task_id as "
+        "shown); put the final answer in 'summary':\n"
+        f"{json.dumps(envelope_example('synthesizer', run.run_id, 'final'), indent=2)}"
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 

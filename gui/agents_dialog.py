@@ -8,7 +8,7 @@ Requires PySide6 (Windows GUI venv).
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 )
 
 from gui.api_client import ApiClient
-from gui.streaming import CommandWorker
 
 
 class AgentsDialog(QDialog):
@@ -35,6 +34,11 @@ class AgentsDialog(QDialog):
         self.resize(720, 620)
         self._workers: list = []
         self._build_ui()
+        # Poll while a run is in progress: agent runs take minutes (model swaps
+        # + many LLM calls), so they run server-side and we poll for progress.
+        self._poll = QTimer(self)
+        self._poll.setInterval(2000)
+        self._poll.timeout.connect(self._poll_state)
         self._refresh()
 
     def _build_ui(self) -> None:
@@ -57,6 +61,7 @@ class AgentsDialog(QDialog):
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Task / checkpoint", "Status"])
+        self.tree.setColumnWidth(0, 460)  # task titles were being truncated
         layout.addWidget(self.tree, stretch=1)
 
         # Checkpoint / run controls
@@ -88,21 +93,48 @@ class AgentsDialog(QDialog):
 
     def _refresh(self) -> None:
         try:
-            data = self.client.command("agents", "data").get("data", {})
+            state = self.client.agents_state()
         except Exception:  # noqa: BLE001
-            data = {}
+            state = {}
+        self._apply_state(state)
+
+    def _poll_state(self) -> None:
+        try:
+            state = self.client.agents_state()
+        except Exception as error:  # noqa: BLE001
+            self.status.setText(f"Lost contact with server: {error}")
+            self._poll.stop()
+            self.run_btn.setEnabled(True)
+            return
+        self._apply_state(state)
+        if not state.get("running"):
+            self._poll.stop()
+            self.run_btn.setEnabled(True)
+            if state.get("result"):
+                self.log.setPlainText(state["result"])
+
+    def _apply_state(self, state: dict) -> None:
+        data = state.get("data", {})
+        if state.get("running"):
+            self.status.setText(f"⏳ {state.get('stage') or 'running'}…")
+        self._render(data, running=bool(state.get("running")))
+
+    def _render(self, data: dict, running: bool = False) -> None:
         self.enabled_check.blockSignals(True)
         self.enabled_check.setChecked(bool(data.get("enabled")))
         self.enabled_check.blockSignals(False)
         self._current = data.get("current")
         self.tree.clear()
         if not self._current:
-            self.status.setText("No agent runs yet.")
+            if not running:
+                self.status.setText("No agent runs yet.")
             return
         run = self._current
-        self.status.setText(
-            f"Run {run.get('run_id', '')[:12]} — {run.get('status', '')}: {run.get('goal', '')}"
-        )
+        if not running:  # while running, the stage line owns the status label
+            self.status.setText(
+                f"Run {run.get('run_id', '')[:12]} — {run.get('status', '')}: "
+                f"{run.get('goal', '')}"
+            )
         tasks_node = QTreeWidgetItem(self.tree, ["Tasks", ""])
         tasks_node.setExpanded(True)
         for task in run.get("tasks", []):
@@ -133,19 +165,18 @@ class AgentsDialog(QDialog):
         goal = self.goal_edit.text().strip()
         if not goal:
             return
-        self.status.setText("Running agent workflow… (this can take a while)")
+        try:
+            resp = self.client.agents_start(goal)
+        except Exception as error:  # noqa: BLE001
+            self.log.setPlainText(f"Could not start run: {error}")
+            return
+        if not resp.get("started"):
+            self.log.setPlainText(resp.get("message", "Could not start run."))
+            return
+        self.log.setPlainText("")
+        self.status.setText("⏳ starting…")
         self.run_btn.setEnabled(False)
-        worker = CommandWorker(self.client, "agents", f"run {goal}")
-        worker.done.connect(self._on_run_done)
-        worker.error.connect(lambda t: self._on_run_done({"text": t}))
-        worker.finished.connect(lambda: self._drop(worker))
-        self._workers.append(worker)
-        worker.start()
-
-    def _on_run_done(self, result: dict) -> None:
-        self.run_btn.setEnabled(True)
-        self.log.setPlainText(result.get("text", ""))
-        self._refresh()
+        self._poll.start()
 
     def _selected_checkpoint(self) -> str:
         item = self.tree.currentItem()
@@ -163,19 +194,23 @@ class AgentsDialog(QDialog):
         self._refresh()
 
     def _resume(self) -> None:
-        self.status.setText("Resuming…")
-        worker = CommandWorker(self.client, "agents", "resume")
-        worker.done.connect(self._on_run_done)
-        worker.error.connect(lambda t: self._on_run_done({"text": t}))
-        worker.finished.connect(lambda: self._drop(worker))
-        self._workers.append(worker)
-        worker.start()
+        try:
+            resp = self.client.agents_resume("")
+        except Exception as error:  # noqa: BLE001
+            self.log.setPlainText(f"Could not resume: {error}")
+            return
+        if not resp.get("started"):
+            self.log.setPlainText(resp.get("message", "Could not resume."))
+            return
+        self.status.setText("⏳ resuming…")
+        self.run_btn.setEnabled(False)
+        self._poll.start()
 
     def _cancel(self) -> None:
         result = self.client.command("agents", "cancel")
         self.log.setPlainText(result.get("text", ""))
         self._refresh()
 
-    def _drop(self, worker) -> None:
-        if worker in self._workers:
-            self._workers.remove(worker)
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        self._poll.stop()  # a run keeps going server-side; just stop polling
+        super().closeEvent(event)

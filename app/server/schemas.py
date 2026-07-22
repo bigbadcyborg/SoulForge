@@ -40,6 +40,23 @@ class SessionStartResponse(BaseModel):
     message: str = ""
 
 
+class AgentStartRequest(BaseModel):
+    goal: str = ""
+    run_id: str = ""  # used by resume
+
+
+class AgentStartResponse(BaseModel):
+    started: bool
+    message: str = ""
+
+
+class AgentStateResponse(BaseModel):
+    running: bool = False
+    stage: str = ""
+    result: str = ""
+    data: dict = {}
+
+
 class SnapshotResponse(BaseModel):
     text: str
     success: bool = True

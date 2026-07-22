@@ -232,6 +232,15 @@ class FakeController:
     def agents_data(self, run_id: str = "") -> dict:
         return {"enabled": False, "current": None, "runs": []}
 
+    def run_agent_workflow(self, goal: str, *, on_progress=None):
+        if on_progress:
+            on_progress("planning")
+        self.agent_goal = goal
+        return SimpleNamespace(success=True, message=f"ran: {goal}")
+
+    def resume_agent_run(self, run_id: str = "", *, on_progress=None):
+        return SimpleNamespace(success=True, message="resumed")
+
     def curator_data(self) -> dict:
         return {"enabled": False, "findings": [], "active_skills": [], "archived_skills": []}
 
@@ -348,6 +357,23 @@ def test_session_start_endpoint(client: TestClient) -> None:
     )
     assert r.status_code == 200
     assert r.json()["started"] is True
+
+
+def test_agents_start_is_async_and_state_polls(client: TestClient) -> None:
+    # Start returns immediately (the run happens on a worker thread) so the GUI
+    # never blocks on a multi-minute request.
+    r = client.post("/api/agents/start", json={"goal": "do a thing"})
+    assert r.status_code == 200
+    assert r.json()["started"] is True
+
+    state = client.get("/api/agents/state").json()
+    assert "running" in state and "stage" in state and "data" in state
+    assert "runs" in state["data"]
+
+
+def test_agents_start_requires_goal(client: TestClient) -> None:
+    r = client.post("/api/agents/start", json={"goal": "   "})
+    assert r.json()["started"] is False
 
 
 def test_ping_exposes_stage_and_vision(client: TestClient) -> None:

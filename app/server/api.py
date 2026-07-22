@@ -29,6 +29,9 @@ from starlette.concurrency import run_in_threadpool
 from app.core.chat_controller import ChatController
 from app.core.command_router import CommandRouter
 from app.server.schemas import (
+    AgentStartRequest,
+    AgentStartResponse,
+    AgentStateResponse,
     CommandRequest,
     CommandResponse,
     PingResponse,
@@ -167,6 +170,69 @@ def create_app(controller: ChatController, transcriber=None) -> FastAPI:
 
     # Shared session-load state (updated by the loader thread, read by ping).
     session_state: dict = {"stage": "idle", "vision_loaded": False, "loading": False}
+    # Agent runs are long (model swaps + many LLM calls), so they run in a
+    # background thread and the GUI polls /api/agents/state — a single blocking
+    # request would exceed any sane HTTP timeout.
+    agent_state: dict = {"running": False, "stage": "", "result": ""}
+
+    def _run_agent_job(kind: str, goal: str, run_id: str) -> None:
+        def progress(line: str) -> None:
+            agent_state["stage"] = line
+
+        try:
+            agent_state.update({"running": True, "stage": "starting", "result": ""})
+            if kind == "resume":
+                result = controller.resume_agent_run(run_id, on_progress=progress)
+            else:
+                result = controller.run_agent_workflow(goal, on_progress=progress)
+            agent_state["result"] = result.message
+        except Exception as error:  # noqa: BLE001
+            agent_state["result"] = f"Agent run failed: {error}"
+        finally:
+            agent_state["running"] = False
+            agent_state["stage"] = "done"
+
+    @app.post(
+        "/api/agents/start",
+        response_model=AgentStartResponse,
+        dependencies=[Depends(auth)],
+    )
+    async def agents_start(request: AgentStartRequest) -> AgentStartResponse:
+        if agent_state["running"]:
+            return AgentStartResponse(started=False, message="An agent run is already in progress.")
+        if not request.goal.strip():
+            return AgentStartResponse(started=False, message="Goal is required.")
+        threading.Thread(
+            target=_run_agent_job, args=("run", request.goal, ""), daemon=True
+        ).start()
+        return AgentStartResponse(started=True, message="Agent run started.")
+
+    @app.post(
+        "/api/agents/resume",
+        response_model=AgentStartResponse,
+        dependencies=[Depends(auth)],
+    )
+    async def agents_resume(request: AgentStartRequest) -> AgentStartResponse:
+        if agent_state["running"]:
+            return AgentStartResponse(started=False, message="An agent run is already in progress.")
+        threading.Thread(
+            target=_run_agent_job, args=("resume", "", request.run_id), daemon=True
+        ).start()
+        return AgentStartResponse(started=True, message="Resuming agent run.")
+
+    @app.get(
+        "/api/agents/state",
+        response_model=AgentStateResponse,
+        dependencies=[Depends(auth)],
+    )
+    async def agents_state() -> AgentStateResponse:
+        data = await run_in_threadpool(controller.agents_data, "")
+        return AgentStateResponse(
+            running=agent_state["running"],
+            stage=agent_state["stage"],
+            result=agent_state["result"],
+            data=data,
+        )
 
     @app.get("/api/ping", response_model=PingResponse)
     async def ping() -> PingResponse:

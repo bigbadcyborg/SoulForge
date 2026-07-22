@@ -302,6 +302,13 @@ class ModelRuntime:
             return profile.chat_model
         return self.config.model.chat_model
 
+    def _profile_chat_format(self, profile_name: str) -> str:
+        """Chat format a profile loads with (profile override or model default)."""
+        profile = self._profile_config(profile_name)
+        if profile is not None and profile.chat_format:
+            return profile.chat_format
+        return self.config.model.chat_format
+
     def _profile_residency(self, profile_name: str) -> str:
         profile = self._profile_config(profile_name)
         if profile is None:
@@ -376,14 +383,25 @@ class ModelRuntime:
                 "Check model.chatModelPath or agents.modelProfiles in config.yaml."
             )
 
+        # Several agent roles usually point at the same GGUF. Reuse the loaded
+        # instance instead of loading a second copy — otherwise N roles means N
+        # copies of the same weights and the VRAM budget blows up.
+        wanted_format = self._profile_chat_format(key)
+        for loaded_key, loaded_model in self._chat_profiles.items():
+            if (
+                self._profile_paths.get(loaded_key) == model_path
+                and self._profile_chat_format(loaded_key) == wanted_format
+            ):
+                self._chat_profiles[key] = loaded_model
+                self._profile_paths[key] = model_path
+                self._active_profile = key
+                if key == "default":
+                    self._chat = loaded_model
+                return loaded_model
+
         label = "chat model" if key == "default" else f"agent model '{key}'"
         self._notify_load(f"Loading {label}...")
-        profile = self._profile_config(key)
-        chat_format = (
-            profile.chat_format
-            if profile is not None and profile.chat_format
-            else self.config.model.chat_format
-        )
+        chat_format = wanted_format
         chat = Llama(
             model_path=str(model_path),
             n_ctx=self.config.model.context_size,

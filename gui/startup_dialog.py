@@ -7,14 +7,18 @@ so nothing has to load lazily mid-session. Requires PySide6 (Windows GUI venv).
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
+    QMessageBox,
     QScrollArea,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -30,6 +34,61 @@ AGENT_ROLES = [
     "critic",
     "synthesizer",
 ]
+
+# Shown by the "?" button next to each role: what the role does and what kind
+# of model suits it. Roles pointing at the same file share one loaded copy, so
+# reusing a model across roles costs no extra VRAM.
+ROLE_HELP: dict[str, tuple[str, str]] = {
+    "orchestrator": (
+        "Breaks your goal into a dependency-ordered task graph and decides "
+        "revisions. This is the hardest reasoning job in the pipeline and the "
+        "most common place a run fails, so give it your strongest model.",
+        "Type: general instruct / reasoning (not a coder model)\n"
+        "Size: 30B–70B ideal · 12B workable · under 7B often fails to emit a "
+        "valid task graph\n"
+        "Tip: it runs only during planning, so a big 'swap' model here costs "
+        "time but not sustained VRAM.",
+    ),
+    "researcher": (
+        "Gathers scoped local context — retrieved documents, files, memory — "
+        "and summarizes it for the other roles without inventing sources.",
+        "Type: general instruct, good at summarizing/extraction\n"
+        "Size: 7B–12B is plenty\n"
+        "Tip: speed matters more than depth; a small model keeps runs snappy.",
+    ),
+    "creator": (
+        "Builds the main deliverable — the code, document, or draft that the "
+        "run is actually producing. Usually the quality bottleneck.",
+        "Type: a coder model if your goal is code (e.g. Qwen2.5-Coder), "
+        "otherwise a strong general instruct model\n"
+        "Size: 12B–32B · larger pays off most here\n"
+        "Tip: this is the best place to spend your VRAM budget after the "
+        "orchestrator.",
+    ),
+    "executor": (
+        "Requests local tools (shell, file, fetch) and reports what happened. "
+        "It must emit precise JSON tool arguments rather than prose.",
+        "Type: general instruct with reliable instruction-following\n"
+        "Size: 7B–12B\n"
+        "Tip: accuracy beats creativity; tool calls still require your "
+        "approval, so a smaller model here is low-risk.",
+    ),
+    "critic": (
+        "Checks the run's output against the goal and success criteria, and "
+        "asks for revisions when it falls short.",
+        "Type: general instruct, strong at following rubrics\n"
+        "Size: 7B–14B\n"
+        "Tip: runs at a low temperature by design — a mid-size model is fine; "
+        "too small and it rubber-stamps bad output.",
+    ),
+    "synthesizer": (
+        "Writes the final user-facing answer once the graph passes review, "
+        "grounded in the completed task outputs.",
+        "Type: general instruct with good writing quality\n"
+        "Size: 12B–32B\n"
+        "Tip: this is the text you actually read, so don't go too small.",
+    ),
+}
 
 
 class StartupDialog(QDialog):
@@ -91,7 +150,14 @@ class StartupDialog(QDialog):
             if label in available:
                 combo.setCurrentText(label)
             self._role_combos[role] = combo
-            roles_form.addRow(f"{role}:", combo)
+            roles_form.addRow(f"{role}:", self._role_row(role, combo))
+        note = QLabel(
+            "Roles set to the same model share one loaded copy — reusing a "
+            "model across roles costs no extra VRAM."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray;")
+        roles_form.addRow(note)
         layout.addWidget(self.agents_group)
 
         # Vision (checkable group = preload vision)
@@ -123,6 +189,31 @@ class StartupDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         outer.addWidget(buttons)
+
+    def _role_row(self, role: str, combo: QComboBox) -> QWidget:
+        """A role's model dropdown plus a clickable '?' with recommendations."""
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(combo, stretch=1)
+        help_btn = QToolButton()
+        help_btn.setText("?")
+        help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        summary, recommendation = ROLE_HELP.get(role, ("", ""))
+        help_btn.setToolTip(summary or f"About the {role} role")
+        help_btn.clicked.connect(lambda _=False, r=role: self._show_role_help(r))
+        layout.addWidget(help_btn)
+        return row
+
+    def _show_role_help(self, role: str) -> None:
+        summary, recommendation = ROLE_HELP.get(
+            role, ("No guidance available.", "")
+        )
+        box = QMessageBox(self)
+        box.setWindowTitle(f"{role.capitalize()} — model guidance")
+        box.setText(f"<b>What it does</b><br>{summary}")
+        box.setInformativeText(f"Recommended model\n\n{recommendation}")
+        box.exec()
 
     # -- results ---------------------------------------------------------
 

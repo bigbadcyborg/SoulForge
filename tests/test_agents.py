@@ -197,7 +197,7 @@ def test_agent_manager_repairs_bad_json_and_completes(tmp_path) -> None:
                 ],
             )
         if profile == "creator":
-            if "task_id 'final'" in messages[-1]["content"]:
+            if "\"task_id\": \"final\"" in messages[-1]["content"]:
                 return _envelope(
                     role="synthesizer",
                     run_id=manager.active_run_id,
@@ -312,14 +312,14 @@ def test_resume_run_after_checkpoint_completes(tmp_path) -> None:
 
     def completion(profile, messages, stream=False):
         content = messages[-1]["content"]
-        if "task_id 'final'" in content:
+        if "\"task_id\": \"final\"" in content:
             return _envelope(
                 role="synthesizer",
                 run_id="run_resume",
                 task_id="final",
                 summary="done",
             )
-        if "task_id 'critic'" in content:
+        if "\"task_id\": \"critic\"" in content:
             return _envelope(role="critic", run_id="run_resume", task_id="critic")
         # The resumed executor task must see its approved tool result.
         assert "wrote it" in content
@@ -498,7 +498,7 @@ def test_start_run_emits_progress(tmp_path) -> None:
                 ],
             )
         if profile == "creator":
-            if "task_id 'final'" in messages[-1]["content"]:
+            if "\"task_id\": \"final\"" in messages[-1]["content"]:
                 return _envelope(
                     role="synthesizer",
                     run_id=manager.active_run_id,

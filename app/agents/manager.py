@@ -24,6 +24,7 @@ from app.agents.models import (
 from app.agents.prompts import (
     critic_messages,
     orchestrator_messages,
+    planner_retry_messages,
     result_context,
     synthesizer_messages,
     task_messages,
@@ -115,10 +116,31 @@ class AgentManager:
                     ),
                 )
                 run.results.append(plan.to_result())
-                run.tasks = tasks_from_planner_envelope(
-                    plan,
-                    default_max_attempts=self.config.agents.max_iterations,
-                )
+                try:
+                    run.tasks = tasks_from_planner_envelope(
+                        plan,
+                        default_max_attempts=self.config.agents.max_iterations,
+                    )
+                except AgentProtocolError as plan_error:
+                    # The envelope parsed but carried no usable task_graph. Give
+                    # the planner one corrective retry naming the problem before
+                    # blocking the run.
+                    self._emit(f"● orchestrator: unusable plan ({plan_error}) — retrying")
+                    plan = self._run_envelope(
+                        role="orchestrator",
+                        task_id="plan",
+                        run=run,
+                        messages=planner_retry_messages(
+                            run,
+                            self.config.agents.max_iterations,
+                            str(plan_error),
+                        ),
+                    )
+                    run.results.append(plan.to_result())
+                    run.tasks = tasks_from_planner_envelope(
+                        plan,
+                        default_max_attempts=self.config.agents.max_iterations,
+                    )
                 self._emit(f"● plan ready: {len(run.tasks)} task(s)")
                 self.store.save(run)
                 # Warm residents only after planning: the orchestrator's swap

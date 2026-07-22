@@ -21,7 +21,10 @@ class ApiClient:
     def __init__(self, settings: GuiSettings, http_client: httpx.Client | None = None) -> None:
         self.settings = settings
         self._own_client = http_client is None
-        self._http = http_client or httpx.Client(base_url=settings.base_url, timeout=120.0)
+        # Generous timeout: commands like ingest or a curator review are blocking
+        # LLM/IO work that can take minutes. (Agent runs use the async
+        # /api/agents/* endpoints instead of one long request.)
+        self._http = http_client or httpx.Client(base_url=settings.base_url, timeout=900.0)
 
     def _headers(self) -> dict[str, str]:
         if self.settings.auth_token:
@@ -71,6 +74,25 @@ class ApiClient:
             data={"prompt": prompt, "inject": str(inject).lower()},
             headers=self._headers(),
         )
+        resp.raise_for_status()
+        return resp.json()
+
+    def agents_start(self, goal: str) -> dict[str, Any]:
+        resp = self._http.post(
+            "/api/agents/start", json={"goal": goal}, headers=self._headers()
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def agents_resume(self, run_id: str = "") -> dict[str, Any]:
+        resp = self._http.post(
+            "/api/agents/resume", json={"run_id": run_id}, headers=self._headers()
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def agents_state(self) -> dict[str, Any]:
+        resp = self._http.get("/api/agents/state", headers=self._headers())
         resp.raise_for_status()
         return resp.json()
 
