@@ -250,12 +250,16 @@ def create_app(controller: ChatController, transcriber=None) -> FastAPI:
         dependencies=[Depends(auth)],
     )
     async def agents_state() -> AgentStateResponse:
+        # Read the flags *before* the run record. A client stops polling when it
+        # sees running=False, so that snapshot must carry the finished run: read
+        # the other way round and a run completing in between reports "done"
+        # alongside a record written before the final answer landed.
+        running = agent_state["running"]
+        stage = agent_state["stage"]
+        result = agent_state["result"]
         data = await run_in_threadpool(controller.agents_data, "")
         return AgentStateResponse(
-            running=agent_state["running"],
-            stage=agent_state["stage"],
-            result=agent_state["result"],
-            data=data,
+            running=running, stage=stage, result=result, data=data
         )
 
     @app.post(

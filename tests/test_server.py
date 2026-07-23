@@ -269,6 +269,27 @@ def test_ping(client: TestClient) -> None:
     assert body["ready"] is True
 
 
+def test_agents_state_returns_flags_with_the_run_record() -> None:
+    """The GUI stops polling on running=False and renders from `data`.
+
+    Both must come back together, since the client has no other source for the
+    finished run's answer.
+    """
+    controller = FakeController()
+    controller.agents_data = lambda run_id="": {
+        "enabled": True,
+        "current": {"run_id": "r1", "status": "completed", "final_answer": "42"},
+        "runs": [],
+    }
+
+    r = TestClient(create_app(controller)).get("/api/agents/state")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["running"] is False
+    assert body["data"]["current"]["final_answer"] == "42"
+
+
 def test_agents_load_preloads_models(client: TestClient) -> None:
     """The Load Agents button warms the planner before a run needs it."""
     r = client.post("/api/command", json={"name": "agents", "args": "load"})

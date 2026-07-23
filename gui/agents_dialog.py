@@ -88,6 +88,13 @@ class AgentsDialog(QDialog):
             ck.addWidget(b)
         layout.addLayout(ck)
 
+        # Transient feedback ("cancelled", "cannot resume") gets its own line so
+        # it never evicts the run output below it.
+        self.message = QLabel("")
+        self.message.setWordWrap(True)
+        layout.addWidget(self.message)
+
+        layout.addWidget(QLabel("Run output"))
         self.log = QPlainTextEdit(readOnly=True)
         self.log.setMaximumHeight(120)
         layout.addWidget(self.log)
@@ -112,18 +119,25 @@ class AgentsDialog(QDialog):
         try:
             state = self.client.agents_state()
         except Exception as error:  # noqa: BLE001
-            self.status.setText(f"Lost contact with server: {error}")
+            self.message.setText(f"Lost contact with server: {error}")
             self._poll.stop()
             self.run_btn.setEnabled(True)
             self.load_btn.setEnabled(True)
             return
         self._apply_state(state)
-        if not state.get("running"):
-            self._poll.stop()
-            self.run_btn.setEnabled(True)
-            self.load_btn.setEnabled(True)
-            if state.get("result"):
-                self.log.setPlainText(state["result"])
+        if state.get("running"):
+            return
+
+        self._poll.stop()
+        self.run_btn.setEnabled(True)
+        self.load_btn.setEnabled(True)
+        # One authoritative re-fetch on the running -> finished transition, so a
+        # completed run always shows its answer without a manual Refresh. The
+        # server now reads its flags before the run record, but an older server
+        # can still hand back a record written just before the answer landed.
+        self._refresh()
+        if not self.log.toPlainText().strip() and state.get("result"):
+            self.log.setPlainText(state["result"])
 
     def _apply_state(self, state: dict) -> None:
         data = state.get("data", {})
@@ -167,8 +181,9 @@ class AgentsDialog(QDialog):
                 )
                 item.setData(0, Qt.ItemDataRole.UserRole, c.get("checkpoint_id", ""))
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, c)
-        if run.get("final_answer"):
-            self.log.setPlainText(run["final_answer"])
+        # Authoritative: the pane shows this run's output, so a previous run's
+        # answer never lingers next to a new run's task list.
+        self.log.setPlainText(run.get("final_answer", ""))
 
     def _toggle_enabled(self, state: bool) -> None:
         self.client.command("agents", "on" if state else "off")
@@ -180,8 +195,8 @@ class AgentsDialog(QDialog):
         self.run_btn.setEnabled(False)
         self.status.setText("⏳ loading agent models… this can take a few minutes.")
         worker = CommandWorker(self.client, "agents", "load")
-        worker.done.connect(lambda r: self.log.setPlainText(r.get("text", "")))
-        worker.error.connect(lambda t: self.log.setPlainText(f"Load failed: {t}"))
+        worker.done.connect(lambda r: self.message.setText(r.get("text", "")))
+        worker.error.connect(lambda t: self.message.setText(f"Load failed: {t}"))
         worker.finished.connect(lambda: self._load_finished(worker))
         self._workers.append(worker)
         worker.start()
@@ -203,11 +218,12 @@ class AgentsDialog(QDialog):
         try:
             resp = self.client.agents_start(goal)
         except Exception as error:  # noqa: BLE001
-            self.log.setPlainText(f"Could not start run: {error}")
+            self.message.setText(f"Could not start run: {error}")
             return
         if not resp.get("started"):
-            self.log.setPlainText(resp.get("message", "Could not start run."))
+            self.message.setText(resp.get("message", "Could not start run."))
             return
+        self.message.setText("")
         self.log.setPlainText("")
         self.status.setText("⏳ starting…")
         self.run_btn.setEnabled(False)
@@ -225,12 +241,12 @@ class AgentsDialog(QDialog):
     def _checkpoint_action(self, action: str) -> None:
         cid = self._selected_checkpoint()
         if not cid:
-            self.status.setText("Select a pending checkpoint first.")
+            self.message.setText("Select a pending checkpoint first.")
             return
         if action == "approve" and not self._ensure_tool_permissions():
             return  # user declined to grant the permission
         result = self.client.command("agents", f"{action} {cid}")
-        self.log.setPlainText(result.get("text", ""))
+        self.message.setText(result.get("text", ""))
         self._refresh()
 
     def _selected_checkpoint_data(self) -> dict:
@@ -294,7 +310,7 @@ class AgentsDialog(QDialog):
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
-            self.status.setText("Permission not granted — checkpoint left pending.")
+            self.message.setText("Permission not granted — checkpoint left pending.")
             return False
         for name, args in actions:
             self.client.command(name, args)
@@ -304,18 +320,20 @@ class AgentsDialog(QDialog):
         try:
             resp = self.client.agents_resume("")
         except Exception as error:  # noqa: BLE001
-            self.log.setPlainText(f"Could not resume: {error}")
+            self.message.setText(f"Could not resume: {error}")
             return
         if not resp.get("started"):
-            self.log.setPlainText(resp.get("message", "Could not resume."))
+            self.message.setText(resp.get("message", "Could not resume."))
             return
+        self.message.setText("")
         self.status.setText("⏳ resuming…")
         self.run_btn.setEnabled(False)
+        self.load_btn.setEnabled(False)
         self._poll.start()
 
     def _cancel(self) -> None:
         result = self.client.command("agents", "cancel")
-        self.log.setPlainText(result.get("text", ""))
+        self.message.setText(result.get("text", ""))
         self._refresh()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
